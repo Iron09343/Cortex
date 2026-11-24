@@ -1,0 +1,98 @@
+/*
+ * Qubit Menu  Frontend/Colors/ObjectColors.cs
+ * A community driven mod menu for Gorilla Tag with over 1000+ mods
+ *
+ * Copyright (C) 2026  Qubit Software  /Derivative work of Seralyth Software, Goldentrophy Software
+ * https://github.com/QubitGT/Qubit
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using GorillaExtensions;
+using Qubit.Frontend.Classes;
+using UnityEngine;
+
+namespace Qubit.Frontend.Colors
+{
+    public class ObjectColors : MonoBehaviour
+    {
+        public void Start()
+        {
+            if (colors == null)
+            {
+                Destroy(this);
+                return;
+            }
+
+            targetRenderer = GetComponent<Renderer>();
+
+            if (colors.IsFlat())
+            {
+                Update();
+                Destroy(this);
+                return;
+            }
+
+            Update();
+        }
+
+        public void Update()
+        {
+            targetRenderer.enabled = overrideTransparency ?? !colors.transparent;
+
+            if (colors.transparent)
+                return;
+
+            if (!Frontend.Settings.dynamicGradients)
+                targetRenderer.sharedMaterial.color = colors.GetCurrentColor();
+            else
+            {
+                if (colors.IsFlat())
+                    targetRenderer.sharedMaterial.color = colors.GetColor(0);
+                else
+                {
+                    if (targetRenderer.sharedMaterial.shader.name != "Universal Render Pipeline/Unlit" && targetRenderer.sharedMaterial.mainTexture == null)
+                    {
+                        GradientColorKey[] points = colors.colors;
+                        if (Frontend.Settings.legacyGradients && points.Length > 2)
+                        {
+                            points = points[..^1];
+                            float span = points[^1].time;
+                            if (span > 0f)
+                                for (int i = 0; i < points.Length; i++)
+                                    points[i] = new GradientColorKey(points[i].color, points[i].time / span);
+                        }
+
+                        targetRenderer.material = new Material(Shader.Find("Universal Render Pipeline/Unlit"))
+                        {
+                            mainTexture = Extensions.Colors.GetGradientTexture(points)
+                        };
+
+                        if (Frontend.Settings.scrollingGradients)
+                            gameObject.GetOrAddComponent<ScrollMaterial>();
+                    }
+                }
+            }
+
+            if (!Frontend.Settings.transparentMenu) return;
+            Color color = targetRenderer.sharedMaterial.color;
+            color.a = 0.5f;
+            targetRenderer.material.color = color;
+        }
+
+        public Renderer targetRenderer;
+        public ExtGradient colors;
+        public bool? overrideTransparency;
+    }
+}

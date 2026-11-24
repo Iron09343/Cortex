@@ -1,0 +1,5753 @@
+﻿/*
+ * Qubit Menu  Modules/Categories/Settings.cs
+ * A community driven mod menu for Gorilla Tag with over 1000+ mods
+ *
+ * Copyright (C) 2026  Qubit Software  /Derivative work of Seralyth Software, Goldentrophy Software
+ * https://github.com/QubitGT/Qubit
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using GorillaExtensions;
+using Photon.Pun;
+using Photon.Realtime;
+using Qubit.Backend;
+using Qubit.Core;
+using Qubit.Extensions;
+using Qubit.Frontend.Classes;
+using Qubit.Frontend.Colors;
+using Qubit.Libraries.Audio;
+using Qubit.Libraries.Controls;
+using Qubit.Libraries.Core;
+using Qubit.Libraries.Entities;
+using Qubit.Libraries.Interface;
+using Qubit.Libraries.Language;
+using Qubit.Modules.Categories.Gamemode;
+using Qubit.Patches.Netcode;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net;
+using TMPro;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using UnityEngine.Video;
+using UnityEngine.Windows.Speech;
+using UnityEngine.XR;
+using WebSocketSharp;
+using static Qubit.Backend.Preferences;
+using static Qubit.Core.Security;
+using static Qubit.Extensions.Colors;
+using static Qubit.Extensions.GameObj;
+using static Qubit.Extensions.Players;
+using static Qubit.Extensions.Strings;
+using static Qubit.Frontend.Core;
+using static Qubit.Frontend.Keyboard;
+using static Qubit.Frontend.Prompts;
+using static Qubit.Frontend.Resources.Fonts;
+using static Qubit.Frontend.Settings;
+using static Qubit.Libraries.Audio.Sounds;
+using static Qubit.Libraries.Audio.Transcription;
+using static Qubit.Libraries.Controls.Controllers;
+using static Qubit.Libraries.Core.Assets;
+using static Qubit.Libraries.Networking.LocalPlayer;
+using static Qubit.Libraries.Networking.Serialization;
+using static Qubit.Modules.Categories.Visual;
+using static Qubit.Modules.Classes.GunLibrary;
+using static Qubit.Modules.Manager;
+using Audio = Qubit.Modules.Categories.Sound.Audio;
+using Console = Qubit.Backend.Console;
+using Object = UnityEngine.Object;
+using Random = UnityEngine.Random;
+using Soundboard = Qubit.Modules.Categories.Sound.Soundboard;
+using TextMeshPro = TMPro.TextMeshPro;
+
+namespace Qubit.Modules.Categories
+{
+    public static class Settings
+    {
+        #region Types
+        public class TutorialButton : MonoBehaviour
+        {
+            public enum ButtonType
+            {
+                Pause,
+                Close
+            }
+
+            public ButtonType buttonType;
+            public void ClickButton()
+            {
+                switch (buttonType)
+                {
+                    case ButtonType.Pause:
+                        VideoPlayer videoPlayer = TutorialObject.transform.Find("Video").GetComponent<VideoPlayer>();
+                        if (videoPlayer.isPlaying)
+                            videoPlayer.Pause();
+                        else
+                            videoPlayer.Play();
+
+                        break;
+                    case ButtonType.Close:
+                        Destroy(TutorialObject);
+                        Destroy(TutorialSelector.gameObject);
+                        break;
+                }
+            }
+        }
+
+        public class ThemeDefinition
+        {
+            public string Name;
+            public Func<ExtGradient> Background;
+            public Func<ExtGradient> MenuBackground;
+            public Func<ExtGradient[]> ButtonColors;
+            public Func<ExtGradient[]> TextColors;
+        }
+
+        public enum ControllerBinding
+        {
+            None,
+            LeftTrigger,
+            RightTrigger,
+            LeftGrip,
+            RightGrip,
+            LeftPrimaryButton,
+            RightPrimaryButton,
+            LeftSecondaryButton,
+            RightSecondaryButton,
+            JoystickClick,
+            LeftOverride,
+            Keyboard
+        }
+        #endregion
+
+        #region Settings
+        public static GameObject TutorialObject;
+        public static LineRenderer TutorialSelector;
+
+        private static bool lastTrigger;
+
+        public static bool hideId;
+
+        private static RenderTexture spectateRenderTexture;
+        private static GameObject spectateCameraObject;
+
+        public static HashSet<VRRig> Blocked = new HashSet<VRRig>();
+
+        public static int langInd;
+        public static readonly string[] LanguageNames = {
+            "English", "Español", "Français", "Deutsch", "日本語",
+            "Italiano", "Português", "Nederlands", "Русский", "Polski"
+        };
+
+        public static readonly string[] LanguageCodes = {
+            "en", "es", "fr", "de", "ja", "it", "pt", "nl", "ru", "pl"
+        };
+
+        public static readonly string[] MenuButtonNames = { "Primary", "Secondary", "Grip", "Trigger", "Joystick" };
+
+        public static readonly List<ThemeDefinition> Themes = new List<ThemeDefinition>
+        {
+            new ThemeDefinition
+            {
+                Name = "Qubit",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(118, 6, 252, 128))
+                },
+                MenuBackground = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(22, 22, 22, 128))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(118, 6, 252, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(88, 6, 186, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Blue Magenta",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.blue, Color.magenta)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.blue)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Dark Mode",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(50, 50, 50, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(20, 20, 20, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Strobe",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.white, Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(Color.black, Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Bloodlust",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(110, 0, 0, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(110, 0, 0, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(110, 0, 0, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Rainbow",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black),
+                    rainbow = true
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black),
+                        rainbow = true
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Player Material",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black),
+                    copyRigColor = true
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black),
+                        copyRigColor = true
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Lava",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(255, 111, 0, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(255, 111, 0, 255), Color.black)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Rock",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, Color.red)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(Color.red, Color.black)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Ice",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(0, 174, 255, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(0, 174, 255, 255), Color.black)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Water",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(0, 136, 255, 255), new Color32(0, 174, 255, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(0, 100, 188, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(0, 174, 255, 255), new Color32(0, 136, 255, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Minty",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(0, 255, 246, 255), new Color32(0, 255, 144, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(0, 255, 144, 255), new Color32(0, 255, 246, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Pink",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(255, 130, 255, 255), Color.white)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(255, 130, 255, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Purple",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(122, 35, 159, 255), new Color32(60, 26, 89, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(60, 26, 89, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(122, 35, 159, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Magenta Cyan",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.magenta, Color.cyan)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(Color.magenta, Color.cyan)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Red Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.red, Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Orange Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(255, 128, 0, 255), Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(255, 128, 0, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(255, 128, 0, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(255, 128, 0, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Yellow Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.yellow, Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.yellow)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.yellow)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.yellow)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Green Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.green, Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Blue Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.blue, Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.blue)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.blue)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.blue)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Purple Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(119, 0, 255, 255), Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(119, 0, 255, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(119, 0, 255, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(119, 0, 255, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Magenta Fade",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.magenta, Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.magenta)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.magenta)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.magenta)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Banana",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(255, 255, 130, 255), Color.white)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(255, 255, 130, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Pride",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.red, Color.green)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Trans",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(245, 169, 184, 255), new Color32(91, 206, 250, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(245, 169, 184, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(91, 206, 250, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(91, 206, 250, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(91, 206, 250, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(245, 169, 184, 255))
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "MLM Pride",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(7, 141, 112, 255), new Color32(61, 26, 220, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(7, 141, 112, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(61, 26, 220, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(61, 26, 220, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(61, 26, 220, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(7, 141, 112, 255))
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Steel",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(50, 50, 50, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(50, 50, 50, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(75, 75, 75, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Silence",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(80, 0, 80, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Transparent",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black),
+                    transparent = true
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white),
+                        transparent = true
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green),
+                        transparent = true
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "King",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(100, 60, 170, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(150, 100, 240, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(150, 100, 240, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.cyan)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Scoreboard",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(0, 59, 4, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(192, 190, 171, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Red Scoreboard",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(225, 73, 43, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(192, 190, 171, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Rift",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(25, 25, 25, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(40, 40, 40, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(167, 66, 191, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(144, 144, 144, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(144, 144, 144, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Discord Blurple Dark",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(26, 26, 61, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(26, 26, 61, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(43, 17, 84, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "ShibaGT Gold",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, Color.gray)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.yellow)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.magenta)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "ShibaGT Genesis",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "wyvern",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(199, 115, 173, 255), new Color32(165, 233, 185, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(99, 58, 86, 255), new Color32(83, 116, 92, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(99, 58, 86, 255), new Color32(83, 116, 92, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Steal",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(27, 27, 27, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(50, 50, 50, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(66, 66, 66, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "USA Menu",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(100, 25, 125, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(25, 25, 25, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Watch",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(27, 27, 27, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.green)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "AZ Menu",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, new Color32(100, 0, 0, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(100, 0, 0, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "ImGUI",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(21, 22, 23, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(32, 50, 77, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(60, 127, 206, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Dark",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(10, 10, 10, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Light",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.white)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(245, 245, 245, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Blaze",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(255, 163, 26, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "EPILEPTIC",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.black),
+                    epileptic = true
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black),
+                        epileptic = true
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Discord Blurple",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(111, 143, 255, 255), new Color32(163, 184, 255, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(96, 125, 219, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(147, 167, 226, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(33, 33, 101, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(33, 33, 101, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(33, 33, 101, 255))
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "VS Zero",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(19, 22, 27, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(19, 22, 27, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(16, 18, 22, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(82, 96, 122, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(82, 96, 122, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(82, 96, 122, 255))
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Weed",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(new Color32(0, 136, 16, 255), new Color32(0, 127, 14, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(0, 158, 15, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(0, 112, 11, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Pastel Rainbow",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.white),
+                    pastelRainbow = true
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white),
+                        pastelRainbow = true
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Rift Light",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(25, 25, 25, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(40, 40, 40, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(165, 137, 255, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(144, 144, 144, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(144, 144, 144, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Rose",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(176, 12, 64, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(140, 10, 51, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(250, 2, 81, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Ultraviolet",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(124, 25, 194, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(88, 9, 145, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(136, 9, 227, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Cobalt Gold",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(1, 73, 149, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(1, 46, 87, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(0, 37, 74, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(252, 179, 40, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Catppuccin Mocha",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(30, 30, 46, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(88, 91, 112, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(49, 50, 68, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(205, 214, 244, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(186, 194, 222, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(166, 173, 200, 255))
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Rexon",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(45, 25, 75, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(40, 15, 60, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(100, 30, 140, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Tenacity",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(45, 46, 51, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(231, 133, 209, 255), new Color32(56, 155, 193, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Mint Blue",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(45, 46, 51, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(40, 94, 93, 255), new Color32(66, 158, 157, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Pink Blood",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(45, 46, 51, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(255, 166, 201, 255), new Color32(228, 0, 70, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Purple Fire",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(45, 46, 51, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(177, 162, 202, 255), new Color32(104, 71, 141, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Deep Ocean",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(new Color32(32, 32, 32, 255))
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(new Color32(45, 46, 51, 255))
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSimpleGradient(new Color32(60, 82, 145, 255), new Color32(0, 20, 64, 255))
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Bad Apple",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSimpleGradient(Color.black, Color.white)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        transparent = true
+                    },
+                    new ExtGradient
+                    {
+                        transparent = true
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "coolkidd",
+                Background = () => new ExtGradient
+                {
+                    colors = ExtGradient.GetSolidGradient(Color.red)
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.red)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Old ShibaGT RGB",
+                Background = () => new ExtGradient
+                {
+                    colors = new[]
+                    {
+                        new GradientColorKey(Color.red, 0f),
+                        new GradientColorKey(Color.green, 0.333f),
+                        new GradientColorKey(Color.blue, 0.666f),
+                        new GradientColorKey(Color.red, 1f),
+                    }
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = new[]
+                        {
+                            new GradientColorKey(Color.red, 0f),
+                            new GradientColorKey(Color.green, 0.333f),
+                            new GradientColorKey(Color.blue, 0.666f),
+                            new GradientColorKey(Color.red, 1f),
+                        }
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+            new ThemeDefinition
+            {
+                Name = "Old-ish ShibaGT RGB",
+                Background = () => new ExtGradient
+                {
+                    colors = new[]
+                    {
+                        new GradientColorKey(Color.yellow, 0f),
+                        new GradientColorKey(Color.red, 0.2f),
+                        new GradientColorKey(Color.magenta, 0.4f),
+                        new GradientColorKey(Color.blue, 0.6f),
+                        new GradientColorKey(Color.green, 0.8f),
+                        new GradientColorKey(Color.yellow, 1f)
+                    }
+                },
+                ButtonColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.black)
+                    },
+                    new ExtGradient
+                    {
+                        colors = new[]
+                        {
+                            new GradientColorKey(Color.yellow, 0f),
+                            new GradientColorKey(Color.red, 0.2f),
+                            new GradientColorKey(Color.magenta, 0.4f),
+                            new GradientColorKey(Color.blue, 0.6f),
+                            new GradientColorKey(Color.green, 0.8f),
+                            new GradientColorKey(Color.yellow, 1f)
+                        }
+                    }
+                },
+                TextColors = () => new[]
+                {
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    },
+                    new ExtGradient
+                    {
+                        colors = ExtGradient.GetSolidGradient(Color.white)
+                    }
+                }
+            },
+        };
+
+        public static int ThemeCount => Themes.Count;
+
+        private static int menuScaleIndex = 10;
+
+        private static int notificationScaleIndex = 6;
+
+        private static int arraylistScaleIndex = 4;
+
+        private static int overlayScaleIndex = 6;
+
+        private static int previousPage;
+
+        private static TMP_FontAsset chosenFont;
+
+        public static float fontTime;
+
+        public static int fontStyleType = 2;
+
+        public static readonly string[] InputColorNames = {
+            "Red", "Orange", "Yellow", "Green", "Blue", "Cyan",
+            "Purple", "Pink", "White", "Grey", "Black", "Rose"
+        };
+        public static readonly string[] RealInputColors = {
+            "red", "#ff8000", "yellow", "green", "blue", "#00FFFF",
+            "purple", "#FF00FF", "white", "grey", "black", "#ff005d"
+        };
+        public static int inputTextColorInt = 5;
+
+        public static readonly string[] NarratorNames = {
+            "Default", "Kimberly", "Brian", "Matthew", "Joey", "Justin", "Cristiano",
+            "Giorgio", "Ewa", "TikTok", "Grandma", "Trickster", "Elf", "Ghostface",
+            "Zombie", "Narrator", "Pirate", "Song", "TikTok Joey", "Gingerbread Man",
+            "Chris", "Thanksgiving", "Santa", "Google US", "Google UK", "Dog",
+            "Jerkface", "Robot", "Vlad", "Obama"/*, "Mommy ASMR"*/
+        };
+        public static readonly Vector3[] PointerPositions = {
+            new Vector3(0f, -0.1f, 0f),
+            new Vector3(0f, -0.1f, -0.15f),
+            new Vector3(0f, 0.1f, -0.05f),
+            new Vector3(0f, 0.0666f, 0.1f)
+        };
+
+        public static readonly string[] GunVariationNames = {
+            "Default", "Lightning", "Wavy", "Blocky", "Zigzag", "Spring", "Bouncy", "Audio", "Bezier", "Rope"
+        };
+
+        public static readonly string[] GunDirectionNames = { "Default", "Legacy", "Laser", "Finger", "Face" };
+
+        private static int gunLineQualityIndex = 2;
+        public static readonly string[] GunQualityNames = { "Potato", "Low", "Normal", "High", "Extreme" };
+        public static readonly int[] GunQualityValues = { 10, 25, 50, 100, 250 };
+
+        public static bool currentmentalstate;
+
+        private static bool lastFocused;
+
+        private static KeywordRecognizer mainPhrases;
+        private static KeywordRecognizer modPhrases;
+        private static string[] keyWords = { "jarvis", "Qubit", "seralith", "sarolith", "siri", "google", "alexa", "dummy", "computer", "stinky", "silly", "stupid", "console", "go go gadget", "monika", "wikipedia", "gideon", "a i", "ai", "a.i", "chat gpt", "chatgpt", "grok", "grock", "groq", "garmin" };
+        private static readonly string[] cancelKeywords = { "nevermind", "cancel", "never mind", "stop", "i hate you", "die" };
+
+        private static Coroutine timeoutCoroutine;
+
+        public static DictationRecognizer drec;
+        public static KeywordRecognizer krec;
+        public static bool debugDictation;
+        public static bool restartOnFocus;
+        public static float dRestartTime;
+
+        private static LineRenderer clickGuiLine;
+        private static bool lastTriggerClick;
+
+        private static EventSystem eventSystem;
+        private static PointerEventData pointerData;
+        private static readonly List<RaycastResult> uiResults = new List<RaycastResult>();
+        private static GameObject currentUI;
+
+        private static GameObject pressedUI;
+        private static GameObject draggedUI;
+        private static Vector2 lastPointerPos;
+        private static Canvas canvas;
+
+        private static bool isDragging;
+
+        public static GameObject selectObject;
+        public static VRRig lastTarget;
+        public static bool lastTriggerSelect;
+
+        public static int loadingPreferencesFrame;
+
+        public static readonly Dictionary<ControllerBinding, Key> pcBindings = new Dictionary<ControllerBinding, Key>
+        {
+            { ControllerBinding.RightPrimaryButton, Key.E },
+            { ControllerBinding.RightSecondaryButton, Key.R },
+            { ControllerBinding.LeftPrimaryButton, Key.F },
+            { ControllerBinding.LeftSecondaryButton, Key.G },
+            { ControllerBinding.LeftGrip, Key.Digit1 },
+            { ControllerBinding.RightGrip, Key.Digit2 },
+            { ControllerBinding.LeftTrigger, Key.Digit3 },
+            { ControllerBinding.RightTrigger, Key.Digit4 },
+            { ControllerBinding.JoystickClick, Key.Enter },
+            { ControllerBinding.LeftOverride, Key.LeftAlt },
+            { ControllerBinding.Keyboard, Key.Q }
+        };
+        public static bool watchUsed;
+        public static float watchTimer;
+        public static int pointerIndex;
+        #endregion
+
+        #region Methods
+        public static void Search()
+        {
+            isSearching = !isSearching;
+
+            pageNumber = 0;
+            keyboardInput = "";
+
+            if (isSearching)
+                SpawnKeyboard();
+            else
+                DestroyKeyboard();
+        }
+
+        public static void SpawnKeyboard()
+        {
+            isKeyboardPc = isOnPC || toggleButtonActive && keyboardWithToggleButton;
+            inTextInput = true;
+            keyboardInput = "";
+
+            shift = false;
+            lockShift = false;
+
+            if (isKeyboardPc)
+                lastPressedKeys.Add(KeyboardBind);
+
+            if (!isKeyboardPc && VRKeyboard == null)
+            {
+                if (Qubit.Frontend.Legacy.Enabled)
+                {
+                    VRKeyboard = LoadObject<GameObject>("VRKeyboard");
+                    VRKeyboard.transform.position = References.BodyCollider.transform.position;
+                    VRKeyboard.transform.rotation = References.BodyCollider.transform.rotation;
+
+                    menuSpawnPosition = VRKeyboard.transform.Find("MenuSpawnPosition").gameObject;
+                    VRKeyboard.transform.Find("Canvas").gameObject.GetOrAddComponent<ObjectColors>().colors = textColors[1];
+
+                    VRKeyboard.transform.localScale *= scaleWithPlayer ? References.Player.scale * menuScale : menuScale;
+                    menuSpawnPosition.transform.localScale *= scaleWithPlayer ? References.Player.scale * menuScale : menuScale;
+
+                    GameObject keyboardBackground = VRKeyboard.transform.Find("Background").gameObject;
+                    keyboardBackground.GetOrAddComponent<ObjectColors>().colors = menuBackgroundColor;
+                    FollowMenuSettings(keyboardBackground);
+
+                    VRKeyboard.transform.Find("Keys/default").gameObject.GetOrAddComponent<ObjectColors>().colors = buttonColors[0];
+
+                    foreach (GameObject key in VRKeyboard.transform.Find("Seperate").Children())
+                    {
+                        key.GetOrAddComponent<ObjectColors>().colors = buttonColors[0];
+                        FollowMenuSettings(key);
+                    }
+
+                    IEnumerable<GameObject> keys = new[] { "Numbers", "Letters", "Special", "Seperate" }
+                        .Select(name => VRKeyboard.transform.Find(name))
+                        .Where(t => t != null)
+                        .SelectMany(t => t.Children());
+
+                    foreach (GameObject key in keys)
+                    {
+                        key.AddComponent<KeyboardKey>().key = key.name;
+                        key.layer = 2;
+                        FollowMenuSettings(key);
+                    }
+                }
+                else
+                    VRKeyboard = Qubit.Frontend.Keyboard.View.Create();
+            }
+
+            if (lKeyReference == null)
+            {
+                lKeyReference = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                lKeyReference.transform.parent = References.LeftHand;
+                lKeyReference.GetComponent<Renderer>().material.color = backgroundColor.GetColor(0);
+                lKeyReference.transform.localPosition = pointerOffset;
+                lKeyReference.transform.localScale = new Vector3(0.01f, 0.01f, 0.01f);
+                lKeyCollider = lKeyReference.GetComponent<SphereCollider>();
+
+                ObjectColors colorChanger = lKeyReference.AddComponent<ObjectColors>();
+                colorChanger.colors = backgroundColor;
+            }
+
+            if (rKeyReference == null)
+            {
+                rKeyReference = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                rKeyReference.transform.parent = References.RightHand;
+                rKeyReference.GetComponent<Renderer>().material.color = backgroundColor.GetColor(0);
+                rKeyReference.transform.localPosition = pointerOffset;
+                rKeyReference.transform.localScale = new Vector3(0.01f, 0.01f, 0.01f);
+                rKeyCollider = rKeyReference.GetComponent<SphereCollider>();
+
+                ObjectColors colorChanger = rKeyReference.AddComponent<ObjectColors>();
+                colorChanger.colors = backgroundColor;
+            }
+        }
+
+        public static void DestroyKeyboard()
+        {
+            inTextInput = false;
+            isKeyboardPc = false;
+
+            if (lKeyReference != null)
+            {
+                Object.Destroy(lKeyReference);
+                lKeyReference = null;
+            }
+
+            if (rKeyReference != null)
+            {
+                Object.Destroy(rKeyReference);
+                rKeyReference = null;
+            }
+
+            if (VRKeyboard != null)
+            {
+                VRKeyboard.SetActive(false);
+                Object.Destroy(VRKeyboard);
+                VRKeyboard = null;
+            }
+
+            if (TPC != null && TPC.transform.parent.gameObject.name.Contains("CameraTablet") && isOnPC)
+            {
+                isOnPC = false;
+                TPC.transform.position = TPC.transform.parent.position;
+                TPC.transform.rotation = TPC.transform.parent.rotation;
+            }
+        }
+
+        public static void GlobalReturn()
+        {
+            Notifications.Clear();
+
+            if (isSearching)
+            {
+                isSearching = false;
+                DestroyKeyboard();
+                pageNumber = 0;
+            }
+
+            if (Manager.CurrentCategoryName != "Main")
+            {
+                Toggle(Manager.modules[Manager.CurrentCategoryName][0].name, true);
+            }
+            else
+            {
+                pageNumber = 0;
+            }
+
+            Sounds.Play("Return");
+
+            if (prompts.Count > 0)
+                StopCurrentPrompt();
+        }
+
+        public static void StopCurrentPrompt() =>
+            prompts.RemoveAt(0);
+        public static void ShowTutorial()
+        {
+            if (TutorialObject != null)
+                Object.Destroy(TutorialObject);
+
+            TutorialObject = LoadObject<GameObject>("Tutorial");
+
+            TutorialObject.transform.position = References.BodyCollider.transform.position + References.BodyCollider.transform.forward * 1f + Vector3.up * 0.25f;
+            TutorialObject.transform.rotation = References.BodyCollider.transform.rotation * Quaternion.Euler(0f, 180f, 0f);
+
+            string videoName = "q2";
+            switch (Controllers.GetLeftControllerType())
+            {
+                case Controllers.ControllerType.Unknown:
+                case Controllers.ControllerType.Quest2:
+                    videoName = "q2";
+                    break;
+                case Controllers.ControllerType.Quest3:
+                    videoName = "q3";
+                    break;
+                case Controllers.ControllerType.ValveIndex:
+                    videoName = "index";
+                    break;
+                case Controllers.ControllerType.VIVE:
+                    videoName = "vive";
+                    break;
+            }
+
+            VideoPlayer videoPlayer = TutorialObject.transform.Find("Video").GetComponent<VideoPlayer>();
+            videoPlayer.url = $"{PluginInfo.ServerResourcePath}/Videos/Tutorial/tutorial-{videoName}.mp4";
+            videoPlayer.isLooping = true;
+
+            videoPlayer.AddComponent<TutorialButton>().buttonType = TutorialButton.ButtonType.Pause;
+
+            TutorialObject.transform.Find("Close").AddComponent<TutorialButton>().buttonType = TutorialButton.ButtonType.Close;
+        }
+        public static void UpdateTutorial()
+        {
+            if (Vector3.Distance(TutorialObject.transform.position, References.BodyCollider.transform.position) > 2f)
+            {
+                TutorialObject.transform.position = References.BodyCollider.transform.position + References.BodyCollider.transform.forward * 1f + Vector3.up * 0.25f;
+                TutorialObject.transform.rotation = References.BodyCollider.transform.rotation * Quaternion.Euler(0f, 180f, 0f);
+            }
+
+            if (TutorialSelector == null)
+            {
+                TutorialSelector = new GameObject("Qubit_TutorialSelector").AddComponent<LineRenderer>();
+                TutorialSelector.material.shader = Shader.Find("Sprites/Default");
+
+                TutorialSelector.startWidth = 0.01f;
+                TutorialSelector.endWidth = 0.01f;
+
+                TutorialSelector.positionCount = 2;
+
+                TutorialSelector.useWorldSpace = true;
+            }
+
+            TutorialSelector.startColor = BrightenColor(new Color32(255, 128, 0, 128));
+            TutorialSelector.endColor = BrightenColor(new Color32(255, 102, 0, 128));
+
+            Vector3 Direction = Controllers.GetTrueRightHand().forward;
+            Physics.Raycast(References.RightHand.position + Direction / 4f, Direction, out var Ray, 512f, NoInvisLayerMask());
+            if (!XRSettings.isDeviceActive)
+            {
+                Ray ray = TPC.ScreenPointToRay(Mouse.current.position.ReadValue());
+                Physics.Raycast(ray, out Ray, 512f, NoInvisLayerMask());
+            }
+
+            TutorialSelector.SetPosition(0, References.RightHand.position);
+            TutorialSelector.SetPosition(1, Ray.point == Vector3.zero ? References.RightHand.position : Ray.point);
+
+            if ((rightTrigger > 0.5f || Mouse.current.leftButton.isPressed) && !lastTrigger)
+            {
+                TutorialButton gunTarget = Ray.collider.GetComponentInParent<TutorialButton>();
+                if (gunTarget)
+                    gunTarget.ClickButton();
+            }
+
+            lastTrigger = rightTrigger > 0.5f || Mouse.current.leftButton.isPressed;
+        }
+
+        public static void ShowDebug()
+        {
+            string category = "Temporary Category";
+
+            string version = PluginInfo.Version;
+            if (PluginInfo.BetaBuild) version = "<color=blue>Beta</color> " + version;
+            Manager.AddModule(category, new Module { name = "Exit Info Screen", method = () => Toggle("Info Screen"), isTogglable = false, toolTip = "Returns you back to the main page." });
+            Manager.AddModule(category, new Module { name = "DebugMenuName", displayName = "<color=grey><b>Qubit </b></color>" + version, label = true });
+            Manager.AddModule(category, new Module { name = "DebugColor", displayName = "Loading...", label = true });
+            Manager.AddModule(category, new Module { name = "DebugName", displayName = "Loading...", label = true });
+            Manager.AddModule(category, new Module { name = "DebugId", displayName = "Loading...", label = true });
+            Manager.AddModule(category, new Module { name = "DebugClip", displayName = "Loading...", label = true });
+            Manager.AddModule(category, new Module { name = "DebugFps", displayName = "Loading...", label = true });
+            Manager.AddModule(category, new Module { name = "DebugRoomA", displayName = "Loading...", label = true });
+            Manager.AddModule(category, new Module { name = "DebugRoomB", displayName = "Loading...", label = true });
+
+            Debug();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+        public static void Debug()
+        {
+            string red = "<color=red>" + MathF.Floor(PlayerPrefs.GetFloat("redValue") * 255f) + "</color>";
+            string green = ", <color=green>" + MathF.Floor(PlayerPrefs.GetFloat("greenValue") * 255f) + "</color>";
+            string blue = ", <color=blue>" + MathF.Floor(PlayerPrefs.GetFloat("blueValue") * 255f) + "</color>";
+            Manager.GetIndex("DebugColor").displayName = "Color: " + red + green + blue;
+
+            string master = Networking.InRoom && PhotonNetwork.IsMasterClient ? "<color=red> [Master]</color>" : "";
+            Manager.GetIndex("DebugName").displayName = PhotonNetwork.LocalPlayer.NickName + master;
+
+            Manager.GetIndex("DebugId").displayName = "<color=green>ID: </color>" + (hideId ? "Hidden" : PhotonNetwork.LocalPlayer.UserId);
+            Manager.GetIndex("DebugClip").displayName = "<color=green>Clip: </color>" + (GUIUtility.systemCopyBuffer.Length > 25 ? GUIUtility.systemCopyBuffer[..25] : GUIUtility.systemCopyBuffer);
+            Manager.GetIndex("DebugFps").displayName = "<b>" + lastDeltaTime + "</b> FPS <b>" + PhotonNetwork.GetPing() + "</b> Ping";
+            Manager.GetIndex("DebugRoomA").displayName = "<color=blue>" + ManagerRegistry.NetworkSystem.regionNames[ManagerRegistry.NetworkSystem.currentRegionIndex].ToUpper() + "</color> " + PhotonNetwork.PlayerList.Length + " Players";
+
+            string priv = Networking.InRoom ? ManagerRegistry.NetworkSystem.SessionIsPrivate ? "Private" : "Public" : "";
+            Manager.GetIndex("DebugRoomB").displayName = "<color=blue>" + priv + "</color> " + (Networking.InRoom ? PhotonNetwork.CurrentRoom.Name : "Not in room");
+        }
+        public static void HideDebug()
+        {
+            string category = "Temporary Category";
+
+            Manager.RemoveModule(category, "DebugMenuName");
+            Manager.RemoveModule(category, "DebugColor");
+            Manager.RemoveModule(category, "DebugName");
+            Manager.RemoveModule(category, "DebugId");
+            Manager.RemoveModule(category, "DebugClip");
+            Manager.RemoveModule(category, "DebugFps");
+            Manager.RemoveModule(category, "DebugRoomA");
+            Manager.RemoveModule(category, "DebugRoomB");
+            Manager.CurrentCategoryName = "Main";
+        }
+
+        public static void PlayersTab()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module {
+                    name = "Exit Players",
+                    method =() => Manager.CurrentCategoryName = "Main",
+                    isTogglable = false,
+                    toolTip = "Returns you back to the main page.",
+                    legal = true,
+                }
+            };
+
+            if (!Networking.InRoom)
+                buttons.Add(new Module { name = "Not in a Room", label = true, legal = true });
+            else
+            {
+                for (int i = 0; i < ManagerRegistry.NetworkSystem.PlayerListOthers.Length; i++)
+                {
+                    NetPlayer player = ManagerRegistry.NetworkSystem.PlayerListOthers[i];
+                    string playerColor = "#ffffff";
+                    try
+                    {
+                        playerColor = $"#{ColorToHex(GetVRRigFromPlayer(player).playerColor)}";
+                    }
+                    catch { }
+
+                    buttons.Add(new Module
+                    {
+                        name = $"PlayerButton{i}",
+                        displayName = $"<color={playerColor}>" + player.NickName + "</color>",
+                        method = () => NavigatePlayer(player),
+                        isTogglable = false,
+                        toolTip = $"See information on the player {player.NickName}.",
+                        legal = true
+                    });
+                }
+            }
+
+            Manager.modules["Players"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Players";
+        }
+
+        public static void NavigatePlayer(NetPlayer player)
+        {
+            string targetName = player.NickName;
+
+            VRRig playerRig = GetVRRigFromPlayer(player) ?? null;
+
+            List<Module> buttons = new List<Module> {
+                new Module {
+                    name = "Exit PlayerInspect",
+                    displayName = $"Exit {targetName}",
+                    method =() => PlayersTab(),
+                    isTogglable = false,
+                    toolTip = "Returns you back to the players tab.",
+                    legal = true
+                },
+
+                new Module {
+                    name = "Spectate Player",
+                    displayName = $"Spectate {targetName}",
+                    method =() => SpectatePlayer(playerRig),
+                    isTogglable = false,
+                    toolTip = $"Shows you what {targetName} sees.",
+                    legal = true
+                },
+                new Module {
+                    name = "Block Player",
+                    displayName = $"Block {targetName}",
+                    enableMethod = () => BlockPlayer(playerRig),
+                    method = HandleBlockedPlayers,
+                    disableMethod = () => UnblockPlayer(playerRig),
+                    isTogglable = true,
+                    toolTip = $"Blocks {targetName}.",
+                    legal = true
+                },
+                new Module {
+                    name = "Teleport to Player",
+                    displayName = $"Teleport to {targetName}",
+                    method =() => Movement.TeleportToPlayer(player),
+                    isTogglable = false,
+                    toolTip = $"Teleports you to {targetName}."
+                },
+                new Module {
+                    name = "Give Player Guns",
+                    displayName = $"Give {targetName} Guns",
+                    method =() => GiveGunTarget = playerRig,
+                    disableMethod =() => GiveGunTarget = null,
+                    toolTip = $"Gives {targetName} every gun on the menu."
+                },
+                new Module {
+                    name = "Copy Movement",
+                    displayName = $"Copy Movement {targetName}",
+                    method =() => Rig.CopyMovementPlayer(player),
+                    disableMethod = Rig.EnableRig,
+                    toolTip = $"Copies the movement of {targetName}."
+                },
+                new Module {
+                    name = "Follow Player",
+                    displayName = $"Follow {targetName}",
+                    method =() => Rig.FollowPlayer(player),
+                    disableMethod = Rig.EnableRig,
+                    toolTip = $"Follows {targetName}."
+                },
+                new Module {
+                    name = "Tag Player",
+                    displayName = $"Tag {targetName}",
+                    method =() => Tag.TagPlayer(player),
+                    disableMethod = Rig.EnableRig,
+                    toolTip = $"Tags {targetName}."
+                },
+                new Module {
+                    name = "Snowball Fling Player",
+                    displayName = $"Snowball Fling {targetName}",
+                    method =() => Projectile.FlingPlayer(player.VRRig()),
+                    toolTip = $"Flings {targetName} with snowballs."
+                },
+                new Module {
+                    name = "Projectile Blind Player",
+                    displayName = $"Projectile Blind {targetName}",
+                    method =() => Projectile.ProjectileBlindPlayer(player),
+                    toolTip = $"Blinds {targetName} using the egg projectiles."
+                },
+                new Module {
+                    name = "Projectile Lag Player",
+                    displayName = $"Projectile Lag {targetName}",
+                    method =() => Projectile.ProjectileLagPlayer(player),
+                    toolTip = $"Lags {targetName} using the firework projectiles."
+                },
+                new Module {
+                    name = "Lag Player",
+                    displayName = $"Lag {targetName}",
+                    method =() => Overpowered.LagPlayer(player),
+                    toolTip = $"Lags {targetName}."
+                },
+                new Module {
+                    name = "Destroy Player",
+                    displayName = $"Destroy {targetName}",
+                    method =() => Overpowered.DestroyPlayer(player),
+                    toolTip = $"Stops all new players from seeing {targetName}."
+                },
+                new Module {
+                    name = "Guardian Bring Player",
+                    displayName = $"Guardian Bring {targetName}",
+                    method =() => Overpowered.GuardianBringPlayer(player),
+                    toolTip = $"Brings {targetName} to you."
+                },
+                new Module {
+                    name = "Guardian Bring Player Gun",
+                    displayName = $"Guardian Bring {targetName} Gun",
+                    method =() => Overpowered.GuardianBringPlayerGun(player),
+                    toolTip = $"Brings {targetName} to wherever your hand desires."
+                },
+                new Module {
+                    name = "Guardian Kick Player",
+                    displayName = $"Guardian Kick {targetName}",
+                    method =() => Overpowered.GuardianKickTarget(player),
+                    toolTip = $"Kicks {targetName}."
+                },
+                new Module {
+                    name = "Guardian Obliterate Player",
+                    displayName = $"Guardian Obliterate {targetName}",
+                    method =() => Overpowered.GuardianObliteratePlayer(player),
+                    toolTip = $"Obliterates {targetName}."
+                },
+                new Module {
+                    name = "Guardian Crash Player",
+                    displayName = $"Guardian Crash {targetName}",
+                    method =() => Overpowered.GuardianCrashPlayer(player),
+                    toolTip = $"Crashes {targetName}."
+                }
+            };
+
+            if (PhotonNetwork.IsMasterClient)
+            {
+                buttons.AddRange(
+                    new[]
+                    {
+                        new Module {
+                            name = "Vibrate Player",
+                            displayName = $"Vibrate {targetName}",
+                            method =() => Overpowered.SetStatus(RoomSystem.StatusEffects.JoinedTaggedTime, new RaiseEventOptions { TargetActors = new[] { player.ActorNumber } }),
+                            toolTip = $"Vibrates {targetName}'s controllers."
+                        },
+                        new Module {
+                            name = "Slow Player",
+                            displayName = $"Slow {targetName}",
+                            method =() => Overpowered.SetStatus(RoomSystem.StatusEffects.TaggedTime, new RaiseEventOptions { TargetActors = new[] { player.ActorNumber } } ),
+                            toolTip = $"Gives {targetName} tag freeze."
+                        }
+                    }
+                );
+            }
+
+            if (ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId))
+            {
+                buttons.AddRange(
+                    new[]
+                    {
+                        new Module {
+                            name = "Admin Kick Player",
+                            displayName = $"Admin Kick {targetName}",
+                            method =() => Console.ExecuteCommand("kick", ReceiverGroup.All, player.UserId),
+                            isTogglable = false,
+                            toolTip = $"Kicks {targetName} if they're using the menu.",
+                            legal = true
+                        },
+                        new Module {
+                            name = "Admin Bring Player",
+                            displayName = $"Admin Bring {targetName}",
+                            method =() => Console.ExecuteCommand("tp", player.ActorNumber, References.HeadCollider.transform.position),
+                            isTogglable = false,
+                            toolTip = $"Brings {targetName} to you if they're using the menu.",
+                            legal = true
+                        },
+                        new Module {
+                            name = "Admin Crash Player",
+                            displayName = $"Admin Crash {targetName}",
+                            method =() => Console.ExecuteCommand("crash", player.ActorNumber),
+                            isTogglable = false,
+                            toolTip = $"Crashes {targetName} if they're using the menu.",
+                            legal = true
+                        },
+                    }
+                );
+            }
+
+            Color playerColor = playerRig?.playerColor ?? Color.black;
+            if (playerRig)
+                buttons.AddRange(
+                    new[]
+                    {
+                        new Module
+                        {
+                            name = $"Check {player.NickName}'s Mods",
+                            method = () => ModChecker(player),
+                            isTogglable = false,
+                            toolTip = $"View all of \"{player.NickName}\"'s mods."
+                        },
+                        new Module
+                        {
+                            name = "Player Name",
+                            displayName = $"Name: {player.NickName}",
+                            method = () => ChangeName(player.NickName),
+                            isTogglable = false,
+                            toolTip = $"Sets your name to \"{player.NickName}\".",
+                            legal = true
+                        },
+                        new Module
+                        {
+                            name = "Player Color",
+                            displayName =
+                                $"Color: {playerColor.ToRichRGBString()}",
+                            method = () => ChangeColor(playerColor),
+                            isTogglable = false,
+                            toolTip = $"Sets your color to the same as {targetName}.",
+                            legal = true
+                        },
+                        new Module
+                        {
+                            name = "Player User ID",
+                            displayName = $"User ID: {player.UserId}",
+                            method = () =>
+                            {
+                                Notifications.SendFormat("green", "SUCCESS", $"Successfully copied {player.UserId} to the clipboard!",
+                                    5000);
+                                GUIUtility.systemCopyBuffer = player.UserId;
+                            },
+                            isTogglable = false,
+                            toolTip = $"Copies {player.UserId} to your clipboard."
+                        },
+                        new Module
+                        {
+                            name = "Player Creation Date",
+                            displayName =
+                                FormatCreationDateLabel(GetCreationDate(player.UserId, creationDate =>
+                                {
+                                    Manager.GetIndex("Player Creation Date").displayName = FormatCreationDateLabel(creationDate);
+                                    ReloadMenu();
+                                })),
+                            label = true
+                        },
+                        new Module
+                        {
+                            name = "Player Platform",
+                            displayName =
+                                $"Platform: {playerRig.GetPlatform()}",
+                            label = true
+                        },
+                        new Module
+                        {
+                            name = "Player FPS",
+                            displayName = $"FPS: {playerRig.GetFPS()}",
+                            label = true,
+                            legal = true
+                        },
+                        new Module
+                        {
+                            name = "Player Target FPS",
+                            displayName = $"Target FPS: {playerRig.GetTargetFPS()}",
+                            label = true,
+                            legal = true
+                        }
+                    }
+                );
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void SpectatePlayer(VRRig rig)
+        {
+            CleanupSpectateCamera();
+
+            spectateCameraObject = new GameObject("Qubit_SpectateCamera");
+            spectateRenderTexture = new RenderTexture(512, 512, 16);
+            spectateCameraObject.AddComponent<Camera>().targetTexture = spectateRenderTexture;
+            spectateCameraObject.transform.SetParent(rig.headMesh.transform, false);
+            spectateCameraObject.transform.localPosition = new Vector3(0f, 0.25f, 0.25f);
+
+            if (promptMaterial != null)
+                Object.Destroy(promptMaterial);
+
+            promptMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"))
+            {
+                mainTexture = spectateRenderTexture
+            };
+
+            PromptSingle("<https://.mat>", CleanupSpectateCamera, "Done");
+        }
+
+        private static void CleanupSpectateCamera()
+        {
+            if (spectateCameraObject != null)
+            {
+                Object.Destroy(spectateCameraObject);
+                spectateCameraObject = null;
+            }
+
+            if (spectateRenderTexture != null)
+            {
+                spectateRenderTexture.Release();
+                Object.Destroy(spectateRenderTexture);
+                spectateRenderTexture = null;
+            }
+        }
+        public static void BlockPlayer(VRRig rig)
+        {
+            Blocked.Add(rig);
+            rig.DeactivateAllRenderers();
+            rig.voiceAudio.volume = 0f;
+        }
+        public static void UnblockPlayer(VRRig rig)
+        {
+            Blocked.Remove(rig);
+            rig.ReactivateAllRenderers();
+            rig.voiceAudio.volume = 1f;
+        }
+
+        public static void HandleBlockedPlayers()
+        {
+            foreach (VRRig rig in Blocked)
+                rig.BreakHandLinks();
+            ViewSerialization.OverrideSerialization = () =>
+            {
+                if (Blocked.Count == 0)
+                    return true;
+
+                int[] blockedArs = Blocked.Select(rig => rig.Creator.ActorNumber).ToArray();
+                int[] normalArs = Players.ActiveRigs
+                    .Where(rig => !Blocked.Contains(rig))
+                    .Select(rig => rig.Creator.ActorNumber)
+                    .ToArray();
+
+                MassSerialize(true, new[] { References.LocalRig.GetPhotonView() });
+
+                Vector3 positionArchive = References.LocalRig.transform.position;
+                SendSerialize(References.LocalRig.GetPhotonView(), new RaiseEventOptions { TargetActors = normalArs });
+
+                References.LocalRig.transform.position = new Vector3(Random.Range(-99999f, 99999f), 99999f, Random.Range(-99999f, 99999f));
+                SendSerialize(References.LocalRig.GetPhotonView(), new RaiseEventOptions { TargetActors = blockedArs });
+
+                RPCProtection();
+                References.LocalRig.transform.position = positionArchive;
+
+                return false;
+            };
+        }
+        public static void CategorySettings()
+        {
+            List<Module> buttons = new List<Module> { new Module { name = "Exit Menu Settings", method = () => { Manager.CurrentCategoryName = "Settings"; Manager.modules["Temporary Category"] = Array.Empty<Module>(); }, isTogglable = false, toolTip = "Returns you back to the settings menu.", legal = true } };
+
+            foreach (var button in Manager.modules["Main"])
+            {
+#if LEGAL || LEGAL_DEBUG
+                if (!button.legal)
+                    continue;
+#endif
+                buttons.Add(new Module
+                {
+                    name = $"Category{button.name.Hash()}",
+                    displayName = button.name,
+                    enabled = !skipButtons.Contains(button.name),
+                    enableMethod = () => skipButtons.Remove(button.name),
+                    disableMethod = () => skipButtons.Add(button.name),
+                    toolTip = "Toggles the visibility of the category " + button.name + ".",
+                    hideFromArraylist = true,
+                    legal = true
+                });
+            }
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void RightHand()
+        {
+            rightHand = true;
+            if (watchMenu)
+            {
+                Toggle("Watch Menu");
+                Toggle("Watch Menu");
+                Notifications.Clear();
+            }
+
+            if (!Manager.GetIndex("Info Watch").enabled) return;
+            Toggle("Info Watch");
+            Toggle("Info Watch");
+            Notifications.Clear();
+        }
+
+        public static void LeftHand()
+        {
+            rightHand = false;
+            if (watchMenu)
+            {
+                Toggle("Watch Menu");
+                Toggle("Watch Menu");
+                Notifications.Clear();
+            }
+
+            if (!Manager.GetIndex("Info Watch").enabled) return;
+            Toggle("Info Watch");
+            Toggle("Info Watch");
+            Notifications.Clear();
+        }
+
+        public static void ClearAllKeybinds()
+        {
+            foreach (KeyValuePair<string, List<string>> bind in ModBindings)
+            {
+                foreach (string modName in bind.Value)
+                    Manager.GetIndex(modName).customBind = null;
+
+                bind.Value.Clear();
+            }
+        }
+
+        public static void StartBind(string bind)
+        {
+            if (IsRebinding)
+                return;
+            IsBinding = true;
+            BindInput = bind;
+        }
+        public static void StartRebind(string bind)
+        {
+            if (IsBinding)
+                return;
+            IsRebinding = true;
+            BindInput = bind;
+        }
+
+        public static void RemoveRebinds()
+        {
+            foreach (Module[] buttonlist in Manager.modules.Values)
+            {
+                foreach (Module v in buttonlist)
+                    v.rebindKey = null;
+            }
+            Notifications.SendFormat("green", "SUCCESS", "Removed all rebinds.");
+        }
+
+        public static void UpdateMenu()
+        {
+            switch (SystemInfo.operatingSystemFamily)
+            {
+                case OperatingSystemFamily.Windows:
+                    {
+                        string logoLines = "";
+                        foreach (string line in PluginInfo.Logo.Split(@"
+"))
+                            logoLines += Environment.NewLine + @" ""    " + line + @" """;
+
+                        string updateScript = @"@echo off
+title Qubit Updater
+color 5
+setlocal
+
+cls
+echo." + logoLines + @"
+echo.
+
+echo Your menu is updating, please wait...
+echo.
+
+for %%I in (""%~dp0.."") do set ""BASE_DIR=%%~fI\""
+set ""PLUGIN_PATH=%BASE_DIR%BepInEx\plugins""
+set ""MODS_PATH=%BASE_DIR%Mods""
+
+set ""MENU_FILE=""
+
+for %%F in (""%PLUGIN_PATH%\*Qubit*.dll"" ""%MODS_PATH%\*Qubit*.dll"") do (
+    if exist ""%%~fF"" (
+        set ""MENU_FILE=%%~fF""
+        goto update
+    )
+)
+
+echo No menu file found, skipping update.
+goto restart
+
+:update
+echo Found menu file: ""%MENU_FILE%""
+
+set ""DOWNLOAD_NAME=Qubit""
+echo %MENU_FILE% | find /I ""Legal"" >nul
+if %ERRORLEVEL%==0 set ""DOWNLOAD_NAME=Qubit-Legal""
+
+echo Downloading latest release of %DOWNLOAD_NAME%...
+
+curl -L -o ""%MENU_FILE%"" ^
+""" + PluginInfo.GitMaster + @"/releases/latest/download/%DOWNLOAD_NAME%.dll""
+
+:WAIT_LOOP
+tasklist /FI ""IMAGENAME eq Gorilla Tag.exe"" | find /I ""Gorilla Tag.exe"" >nul
+if %ERRORLEVEL%==0 (
+    timeout /t 1 >nul
+    goto WAIT_LOOP
+)
+
+:restart
+echo Launching Gorilla Tag...
+start steam://run/1533390
+pause
+exit";
+
+                        string fileName = $"{PluginInfo.BaseDirectory}/UpdateScript.bat";
+                        File.WriteAllText(fileName, updateScript);
+
+                        string filePath = Files.GetGamePath() + "/" + fileName;
+                        Files.Start(filePath);
+                        Application.Quit();
+                        break;
+                    }
+                case OperatingSystemFamily.Linux:
+                    {
+                        string logoLines = "";
+                        foreach (string line in PluginInfo.Logo.Split(@"
+"))
+                            logoLines += Environment.NewLine + @" ""    " + line + @" """;
+
+                        string updateScript = @"#!/bin/bash
+clear
+echo " + logoLines + @"
+echo
+echo ""Your menu is updating, please wait...""
+echo
+
+BASE_DIR=""$(cd ""$(dirname ""$0"")/.."" && pwd)/""
+PLUGIN_PATH=""$BASE_DIR/BepInEx/plugins""
+MODS_PATH=""$BASE_DIR/Mods""
+
+MENU_FILE=""""
+
+for f in ""$PLUGIN_PATH""/*Qubit*.dll ""$MODS_PATH""/*Qubit*.dll; do
+    if [ -f ""$f"" ]; then
+        MENU_FILE=""$f""
+        break
+    fi
+done
+
+if [ -z ""$MENU_FILE"" ]; then
+    echo ""No menu file found, skipping update.""
+else
+    echo ""Found menu file: $MENU_FILE""
+
+    DOWNLOAD_NAME=""Qubit""
+    if echo ""$MENU_FILE"" | grep -qi ""Legal""; then
+        DOWNLOAD_NAME=""Qubit-Legal""
+    fi
+
+    echo ""Downloading latest release of $DOWNLOAD_NAME...""
+    curl -L -o ""$MENU_FILE"" \
+    """ + PluginInfo.GitMaster + @"/releases/latest/download/${DOWNLOAD_NAME}.dll""
+fi
+
+while pgrep -f ""GorillaTag.exe"" > /dev/null; do
+    sleep 1
+done
+
+echo ""Launching Gorilla Tag...""
+xdg-open ""steam://run/1533390""
+read -n 1 -s -r -p ""Press any key to continue . . .""
+exit 0";
+
+                        string fileName = $"{PluginInfo.BaseDirectory}/UpdateScript.sh";
+                        File.WriteAllText(fileName, updateScript);
+                        Files.Start("chmod", $"+x \"{fileName}\"");
+                        Files.Start(new ProcessStartInfo
+                        {
+                            FileName = "/bin/bash",
+                            Arguments = $"\"{fileName}\"",
+                            UseShellExecute = false
+                        });
+                        Application.Quit();
+                        break;
+                    }
+            }
+        }
+
+        public static void JoystickMenuOff()
+        {
+            joystickMenu = false;
+            joystickOpen = false;
+        }
+
+        public static void PhysicalMenuOn()
+        {
+            physicalMenu = true;
+            physicalOpenPosition = Vector3.zero;
+        }
+
+        public static void PhysicalMenuOff()
+        {
+            physicalMenu = false;
+            physicalOpenPosition = Vector3.zero;
+        }
+
+        public static void WatchMenuOn()
+        {
+            isSearching = false;
+            watchMenu = true;
+            Watches[0].gameObject.SetActive(true);
+            Watches[0].indicator.gameObject.SetActive(true);
+        }
+        public static void CheckWatchMenu()
+        {
+            if (watchTimer == 0)
+                watchTimer = Time.time + 7f;
+
+            if (leftJoystick.sqrMagnitude > 0.1f * 0.1f)
+            {
+                watchTimer = 0;
+                watchUsed = true;
+                return;
+            }
+
+            if (!watchUsed && Time.time >= watchTimer)
+            {
+                Notifications.SendFormat("purple", "WATCH", "Seems that you got stuck using Watch Menu, automatically disabling..");
+                Toggle("Watch Menu");
+            }
+        }
+        public static void WatchMenuOff()
+        {
+            watchMenu = false;
+            watchUsed = false;
+            watchTimer = 0;
+            Watches[0].gameObject.SetActive(false);
+        }
+
+        public static void ApplyMenuLanguage(int index)
+        {
+            langInd = index;
+            Translations.translateCache.Clear();
+            Translations.language = LanguageCodes[index];
+            translate = index != 0;
+        }
+
+        public static void ApplyMenuButton(int index) => menuButtonIndex = index;
+
+        public static void ApplyMenuTheme(int themeType)
+        {
+            Frontend.Settings.themeType = themeType;
+            Module button = Manager.GetIndex("Custom Menu Theme");
+            if (button != null && button.enabled)
+                return;
+            if (themeType < 0 || themeType >= Themes.Count)
+                return;
+
+            ThemeDefinition theme = Themes[themeType];
+            backgroundColor = theme.Background();
+            menuBackgroundColor = theme.MenuBackground != null ? theme.MenuBackground() : backgroundColor;
+            buttonColors = theme.ButtonColors();
+            textColors = theme.TextColors();
+        }
+        public static void ApplyMenuScale(int index) { menuScaleIndex = index; menuScale = index / 10f; }
+        public static void ApplyNotificationScale(int index) { notificationScaleIndex = index; notificationScale = index * 5; }
+        public static void ApplyArraylistScale(int index) { arraylistScaleIndex = index; arraylistScale = index * 5; }
+        public static void ApplyOverlayScale(int index) { overlayScaleIndex = index; overlayScale = index * 5; }
+
+        public static void ChangeCustomMenuTheme()
+        {
+            previousPage = pageNumber;
+            CustomMenuThemePage();
+        }
+
+        public static void CustomMenuThemePage()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Custom Menu Theme", method = () => ExitCustomMenuTheme(), isTogglable = false, toolTip = "Returns you back to the settings menu." },
+                new Module { name = "Background", method = () => CMTBackground(), isTogglable = false, toolTip = "Choose what segment of the background you would like to modify." },
+                new Module { name = "Buttons", method = () => CMTButton(), isTogglable = false, toolTip = "Choose what segment of the button you would like to modify." },
+                new Module { name = "Text", method = () => CMTText(), isTogglable = false, toolTip = "Choose what segment of the text you would like to modify." },
+            };
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void CMTBackground() =>
+            CMTGradientMenu(() => backgroundColor, CustomMenuThemePage, "Background", "the background");
+
+        private static void CMTGradientMenu(Func<ExtGradient> getGradient, Action backMethod, string label, string tooltipTarget)
+        {
+            ExtGradient gradient = getGradient();
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit " + label, method = backMethod, isTogglable = false, toolTip = "Returns you back to the customize menu." },
+            };
+
+            for (int i = 0; i < gradient.colors.Length; i++)
+            {
+                int index = i;
+                buttons.Add(new Module
+                {
+                    name = $"Color {index + 1}",
+                    method = () => CMTGradientPoint(getGradient, backMethod, label, tooltipTarget, index),
+                    isTogglable = false,
+                    toolTip = $"Change color point {index + 1} of {tooltipTarget}."
+                });
+            }
+
+            buttons.Add(new Module
+            {
+                name = "Add Color Point",
+                method = () => { getGradient().AddColorPoint(); WriteCustomTheme(); CMTGradientMenu(getGradient, backMethod, label, tooltipTarget); },
+                isTogglable = false,
+                toolTip = "Adds another color point to the gradient."
+            });
+
+            if (gradient.colors.Length > 2)
+                buttons.Add(new Module
+                {
+                    name = "Remove Color Point",
+                    method = () => { getGradient().RemoveColorPoint(getGradient().colors.Length - 1); WriteCustomTheme(); CMTGradientMenu(getGradient, backMethod, label, tooltipTarget); },
+                    isTogglable = false,
+                    toolTip = "Removes the last color point from the gradient."
+                });
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        private static void CMTGradientPoint(Func<ExtGradient> getGradient, Action backMethod, string label, string tooltipTarget, int index)
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Color", method = () => CMTGradientMenu(getGradient, backMethod, label, tooltipTarget), isTogglable = false, toolTip = "Returns you back to the gradient menu." },
+            };
+            buttons.AddRange(CreateColorModules(
+                () => getGradient().GetColor(index),
+                c => getGradient().SetColorAt(index, c),
+                $"color point {index + 1} of {tooltipTarget}"));
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        private static List<Module> CreateColorModules(Func<Color> getColor, Action<Color> setColor, string tooltipTarget)
+        {
+            Module previewButton = new Module
+            {
+                name = "PreviewLabel",
+                displayName = "<color=#" + ColorToHex(getColor()) + ">Preview</color>",
+                label = true
+            };
+
+            void RefreshPreview()
+            {
+                previewButton.displayName = "<color=#" + ColorToHex(getColor()) + ">Preview</color>";
+            }
+
+            void ApplyChannel(int channel, int v)
+            {
+                if (!Manager.GetIndex("Custom Menu Theme").enabled)
+                    return;
+
+                Color c = getColor();
+                Color updated = channel switch
+                {
+                    0 => new Color(v / 10f, c.g, c.b),
+                    1 => new Color(c.r, v / 10f, c.b),
+                    _ => new Color(c.r, c.g, v / 10f),
+                };
+                setColor(updated);
+                WriteCustomTheme();
+            }
+
+            Module redButton = ButtonHelper.CreateNumeric(
+                "Red", 0, 10,
+                (int)Math.Round(getColor().r * 10f),
+                v => ApplyChannel(0, v),
+                v => v.ToString(),
+                $"Change the red of {tooltipTarget}.",
+                onCycle: _ => RefreshPreview());
+
+            Module greenButton = ButtonHelper.CreateNumeric(
+                "Green", 0, 10,
+                (int)Math.Round(getColor().g * 10f),
+                v => ApplyChannel(1, v),
+                v => v.ToString(),
+                $"Change the green of {tooltipTarget}.",
+                onCycle: _ => RefreshPreview());
+
+            Module blueButton = ButtonHelper.CreateNumeric(
+                "Blue", 0, 10,
+                (int)Math.Round(getColor().b * 10f),
+                v => ApplyChannel(2, v),
+                v => v.ToString(),
+                $"Change the blue of {tooltipTarget}.",
+                onCycle: _ => RefreshPreview());
+
+            return new List<Module> { redButton, greenButton, blueButton, previewButton };
+        }
+        public static void CMTTextTitle()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Title", method = CMTText, isTogglable = false, toolTip = "Returns you back to the text menu." },
+            };
+            buttons.AddRange(CreateColorModules(
+                () => textColors[0].GetColor(0),
+                c => textColors[0].SetColors(c),
+                "the title color"));
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void CMTTextEnabled()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Second Color", method = () => CMTText(), isTogglable = false, toolTip = "Returns you back to the text menu." },
+            };
+            buttons.AddRange(CreateColorModules(
+                () => textColors[2].GetColor(0),
+                c => textColors[2].SetColors(c),
+                "the enabled text color"));
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void CMTTextDisabled()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Second Color", method = () => CMTText(), isTogglable = false, toolTip = "Returns you back to the text menu." },
+            };
+            buttons.AddRange(CreateColorModules(
+                () => textColors[1].GetColor(0),
+                c => textColors[1].SetColors(c),
+                "the disabled text color"));
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void CMTButton()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Buttons", method = CustomMenuThemePage, isTogglable = false, toolTip = "Returns you back to the customize menu." },
+                new Module { name = "Enabled", method = CMTButtonEnabled, isTogglable = false, toolTip = "Choose what type of button color to modify." },
+                new Module { name = "Disabled", method = CMTButtonDisabled, isTogglable = false, toolTip = "Change the color of the second color of the background." },
+            };
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void CMTButtonEnabled() =>
+            CMTGradientMenu(() => buttonColors[1], CMTButton, "Enabled", "the enabled button color");
+
+        public static void CMTButtonDisabled() =>
+            CMTGradientMenu(() => buttonColors[0], CMTButton, "Disabled", "the disabled button color");
+
+        public static void CMTText()
+        {
+            List<Module> buttons = new List<Module> {
+                new Module { name = "Exit Text", method = CustomMenuThemePage, isTogglable = false, toolTip = "Returns you back to the customize menu." },
+                new Module { name = "Title", method = CMTTextTitle, isTogglable = false, toolTip = "Change the color of the title." },
+                new Module { name = "Enabled", method = CMTTextEnabled, isTogglable = false, toolTip = "Change the color of the enabled text." },
+                new Module { name = "Disabled", method = CMTTextDisabled, isTogglable = false, toolTip = "Change the color of the disabled text." },
+            };
+
+            Manager.modules["Temporary Category"] = buttons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void ExitCustomMenuTheme()
+        {
+            pageNumber = previousPage;
+            Manager.CurrentCategoryName = "Menu Settings";
+        }
+
+        public static void ApplyTheme(Preferences.CustomThemeData theme)
+        {
+            ApplyGradientPoints(backgroundColor, theme.Background);
+            ApplyGradientPoints(buttonColors[0], theme.ButtonDisabled);
+            ApplyGradientPoints(buttonColors[1], theme.ButtonEnabled);
+
+            textColors[0].SetColors(theme.textTitle.ToColor32());
+            textColors[1].SetColors(theme.textDisabled.ToColor32());
+            textColors[2].SetColors(theme.textEnabled.ToColor32());
+        }
+
+        private static void ApplyGradientPoints(ExtGradient gradient, Preferences.RgbColor[] points)
+        {
+            if (points == null || points.Length == 0) return;
+            gradient.colors = points.Select((p, i) => new GradientColorKey(p.ToColor32(), points.Length == 1 ? 0f : (float)i / (points.Length - 1))).ToArray();
+        }
+
+        public static void ReadCustomTheme()
+        {
+            var theme = Preferences.GetCustomTheme();
+            if (theme != null)
+                ApplyTheme(theme);
+        }
+
+        public static void ImportCustomTheme(Preferences.CustomThemeData theme)
+        {
+            ApplyTheme(theme);
+            Preferences.SaveCustomTheme(theme);
+        }
+
+        public static Preferences.CustomThemeData ExportCustomTheme() => new Preferences.CustomThemeData
+        {
+            background = backgroundColor.colors.Select(c => new Preferences.RgbColor(c.color)).ToArray(),
+            buttonDisabled = buttonColors[0].colors.Select(c => new Preferences.RgbColor(c.color)).ToArray(),
+            buttonEnabled = buttonColors[1].colors.Select(c => new Preferences.RgbColor(c.color)).ToArray(),
+            textTitle = new Preferences.RgbColor(textColors[0].GetColor(0)),
+            textDisabled = new Preferences.RgbColor(textColors[1].GetColor(0)),
+            textEnabled = new Preferences.RgbColor(textColors[2].GetColor(0)),
+        };
+
+        public static void WriteCustomTheme() =>
+            Preferences.SaveCustomTheme(ExportCustomTheme());
+
+        public static void CustomMenuTheme()
+        {
+            if (Preferences.GetCustomTheme() == null)
+                WriteCustomTheme();
+
+            ReadCustomTheme();
+        }
+
+        public static void FixTheme() =>
+            ApplyMenuTheme(themeType);
+
+        public static void FlipGradients()
+        {
+            backgroundColor.Flip();
+            menuBackgroundColor.Flip();
+            buttonColors[0].Flip();
+            buttonColors[1].Flip();
+        }
+
+        public static void CustomMenuBackground()
+        {
+            if (!File.Exists($"{PluginInfo.BaseDirectory}/CustomBackground.png"))
+                LoadTextureFromURL($"{PluginInfo.ServerResourcePath}/Images/CustomBackground.png", "CustomBackground.png");
+
+            textureFileDirectory.Remove("CustomBackground.png");
+
+            customMenuBackground = true;
+            customMenuBackgroundImage = LoadTextureFromFile("CustomBackground.png");
+        }
+
+        public static void FixMenuBackground()
+        {
+            customMenuBackgroundImage = null;
+            customMenuBackground = false;
+        }
+
+        public static void EnableWatermark()
+        {
+            bool enabled = Manager.GetIndex("Custom Watermark").enabled;
+            if (enabled)
+            {
+                if (!File.Exists($"{PluginInfo.BaseDirectory}/CustomWatermark.png"))
+                    LoadTextureFromURL($"{PluginInfo.ServerResourcePath}/Images/CustomWatermark.png", "CustomWatermark.png");
+
+                textureFileDirectory.Remove("CustomWatermark.png");
+                customWatermark = LoadTextureFromFile("CustomWatermark.png");
+            }
+            else
+            {
+                watermarkImage = new GameObject
+                {
+                    transform =
+                    {
+                        parent = canvasObj.transform
+                    }
+                }.AddComponent<Image>();
+
+                if (watermarkMat == null)
+                    watermarkMat = new Material(watermarkImage.material);
+
+                watermarkImage.material = watermarkMat;
+                watermarkImage.material.SetTexture("_MainTex", customWatermark ?? LoadTextureFromResource($"{PluginInfo.ClientResourcePath}.icon.png"));
+            }
+        }
+
+        public static void CustomWatermark()
+        {
+            if (!File.Exists($"{PluginInfo.BaseDirectory}/CustomWatermark.png"))
+                LoadTextureFromURL($"{PluginInfo.ServerResourcePath}/Images/CustomWatermark.png", "CustomWatermark.png");
+
+            textureFileDirectory.Remove("CustomWatermark.png");
+            customWatermark = LoadTextureFromFile("CustomWatermark.png");
+        }
+        public static void CustomFontType()
+        {
+            string filePath = $"{PluginInfo.BaseDirectory}/CustomFont.ttf";
+            if (!File.Exists(filePath))
+            {
+                Logs.Log("Downloading CustomFont.ttf");
+                WebClient stream = new WebClient();
+                stream.DownloadFile($"{PluginInfo.ServerResourcePath}/Fonts/LiberationSans.ttf", filePath);
+            }
+
+            chosenFont = TMP_FontAsset.CreateFontAsset(new Font($"{Files.GetGamePath()}/{filePath}"));
+            PersistCustomFont();
+        }
+
+        public static void PersistCustomFont()
+        {
+            if (activeFont != chosenFont)
+                activeFont = chosenFont;
+        }
+
+        public static void DisableCustomFont()
+        {
+            // Reapply the already-selected font type instead of advancing the cycle index,
+            // which previously made the font type drift forward one step per toggle.
+            ApplyFontType(fontCycle);
+        }
+
+        public static void ApplyPageType(int index) { pageButtonType = index; buttonOffset = index == 2 ? 2 : 0; }
+        public static void ApplyPageSize(int index) => _pageSize = index;
+        public static void ApplyCharacterDistance(int index) => characterDistance = index;
+        public static void ApplyArrowType(int index) => arrowType = index;
+        public static void ChangeFontRapid()
+        {
+            if (Time.time > fontTime)
+            {
+                Manager.GetIndex("Change Font Type").cycleValue(true);
+                fontTime = Time.time + 0.4f;
+
+                ReloadMenu();
+            }
+        }
+        public static void ApplyInputTextColor(int index) { inputTextColorInt = index; inputTextColor = RealInputColors[index]; }
+        public static void ApplyPCUI(int index) => pcBackgroundIndex = index;
+        public static void ApplyJoystickMenuPosition(int index) => joystickMenuPosition = index;
+        public static void ApplyNotificationTime(int index) => notificationDecayTime = index * 1000;
+
+        private static string DisableTelemetryPath => $"{PluginInfo.BaseDirectory}/Qubit_DisableTelemetry.txt";
+        public static void DisableModTelemetry()
+        {
+            ServerData.DisableTelemetry = true;
+            File.WriteAllText(DisableTelemetryPath, PluginInfo.GeneratedFileFooter);
+        }
+        public static void EnableModTelemetry()
+        {
+            ServerData.DisableTelemetry = false;
+            if (File.Exists(DisableTelemetryPath))
+                File.Delete(DisableTelemetryPath);
+        }
+
+        public static void ApplyNotificationSound(string soundName)
+        {
+            Sounds.DefaultSounds["Notification"] = soundName;
+            Manager.GetIndex("Change Notification Sound").displayName =
+                $"Change Notification Sound {Bracket("green", soundName)}";
+        }
+        public static void ChangeNotificationSound(bool positive = true, bool fromMenu = false)
+        {
+            var notificationKeys = Sounds.SoundList["Notifications"].Keys.ToArray();
+            string current = Sounds.DefaultSounds["Notification"];
+
+            int index = Array.IndexOf(notificationKeys, current);
+            if (index < 0) index = 0;
+            index = ButtonHelper.Wrap(index, 0, notificationKeys.Length - 1, positive);
+
+            string newSound = notificationKeys[index];
+            ApplyNotificationSound(newSound);
+            Manager.GetIndex("Change Notification Sound").value = newSound;
+
+            if (!fromMenu) return;
+
+            References.LocalRig?.leftHandPlayer?.Stop();
+            References.LocalRig?.rightHandPlayer?.Stop();
+
+            Sounds.Play(Sounds.DefaultSounds["Notification"], action: clip => Sounds.Play2DAudio(clip, buttonClickVolume / 10f), vibrate: false);
+        }
+        public static void ApplyNarrationVoice(int index)
+        {
+            narratorIndex = index;
+            narratorName = NarratorNames[index];
+
+            if (krec != null && krec.IsRunning && Time.time > dRestartTime)
+            {
+                DictationRestart();
+                dRestartTime = Time.time + 1f;
+            }
+        }
+        public static void ApplyPointerPosition(int index)
+        {
+            pointerIndex = index;
+            pointerOffset = PointerPositions[index];
+            try { reference.transform.localPosition = pointerOffset; } catch { }
+        }
+        public static void ApplyGunVariation(int index) => gunVariation = index;
+        public static void ApplyGunDirection(int index) => GunDirection = index;
+        public static void ApplyGunLineQuality(int index) { gunLineQualityIndex = index; GunLineQuality = GunQualityValues[index]; }
+
+        public static void FreezePlayerInMenu()
+        {
+            if (physicalMenu ? isMenuButtonHeld : menu != null)
+            {
+                if (closePosition == Vector3.zero)
+                    closePosition = References.Rigidbody.transform.position;
+                else
+                    References.Rigidbody.transform.position = closePosition;
+                References.Rigidbody.linearVelocity = new Vector3(0f, 0f, 0f);
+            }
+            else
+                closePosition = Vector3.zero;
+        }
+        public static void FreezeRigInMenu()
+        {
+            if (menu != null)
+            {
+                if (!currentmentalstate)
+                {
+                    currentmentalstate = true;
+                    References.LocalRig.enabled = false;
+                }
+            }
+            else
+            {
+                if (currentmentalstate)
+                {
+                    currentmentalstate = false;
+                    References.LocalRig.enabled = true;
+                }
+            }
+        }
+
+        public static void AnnoyingModeOff()
+        {
+            annoyingMode = false;
+            ApplyMenuTheme(themeType);
+        }
+
+        public static void DisablePageButtons()
+        {
+            if (Manager.GetIndex("Joystick Menu").enabled)
+            {
+                disablePageButtons = true;
+            }
+            else
+            {
+                Manager.GetIndex("Disable Page Buttons").SetEnabled(false);
+                ReloadMenu();
+                Notifications.SendFormat("red", "DISABLE", "Disable Page Buttons can only be used when using Joystick Menu.");
+            }
+        }
+
+        private static string FormatCreationDateLabel(string date) =>
+            date == "Error" ? "" : $"Creation Date: {date}";
+
+        public static void CustomMenuName()
+        {
+            Apply();
+
+            if (Time.time > timeMenuStarted + 10f)
+            {
+                Prompt("Would you like to set a custom menu name right now?", () =>
+                {
+                    PromptSingleText("What would you like to set the menu name to?", () =>
+                    {
+                        File.WriteAllText($"{PluginInfo.BaseDirectory}/Qubit_CustomMenuName.txt", keyboardInput);
+                        Apply();
+                        PromptSingle("You can always change this again by re-enabling the mod or changing it in the Qubit folder! (located in the Gorilla Tag installation folder)");
+                    });
+                }, Apply);
+            }
+
+            static void Apply()
+            {
+                doCustomName = true;
+                if (!File.Exists($"{PluginInfo.BaseDirectory}/Qubit_CustomMenuName.txt"))
+                    File.WriteAllText($"{PluginInfo.BaseDirectory}/Qubit_CustomMenuName.txt", "Your Text Here");
+                customMenuName = File.ReadAllText($"{PluginInfo.BaseDirectory}/Qubit_CustomMenuName.txt");
+            }
+        }
+        public static void CheckFocus()
+        {
+            if (!Application.isFocused && lastFocused && Time.time > timeMenuStarted + 5f)
+                Notifications.SendFormat("red", "ERROR", "You are not focused on Gorilla Tag. Voice transcription mods will not function. Please focus/click on the game.");
+
+            lastFocused = Application.isFocused;
+            if (Application.isFocused && lastFocused)
+                DictationRestart();
+        }
+        public static void VoiceRecognitionOn()
+        {
+            if (!File.Exists($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt"))
+                File.WriteAllLines($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt", keyWords);
+            keyWords = File.ReadAllLines($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt");
+            mainPhrases = new KeywordRecognizer(keyWords);
+            mainPhrases.OnPhraseRecognized += ModRecognition;
+            mainPhrases.Start();
+        }
+        public static void ModRecognition(PhraseRecognizedEventArgs args)
+        {
+            mainPhrases.Stop();
+
+            if (!Manager.GetIndex("Chain Voice Commands").enabled)
+                timeoutCoroutine = Coroutines.instance.StartCoroutine(Timeout(string.Empty));
+
+            List<string> rawbuttonnames = cancelKeywords.ToList();
+
+            foreach (Module[] buttonlist in Manager.modules.Values)
+            {
+                foreach (Module v in buttonlist)
+                {
+                    string buttonName = v.RenderName;
+
+                    if (buttonName.Contains(" <color"))
+                        buttonName = buttonName.Split(" <color")[0];
+
+                    rawbuttonnames.Add(buttonName);
+                }
+            }
+
+            modPhrases = new KeywordRecognizer(rawbuttonnames.ToArray());
+            modPhrases.OnPhraseRecognized += ExecuteVoiceCommand;
+            modPhrases.Start();
+
+            if (dynamicSounds)
+                LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/select.ogg", "Audio/Menu/select.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+
+            Notifications.SendFormat("purple", "VOICE", "Listening...", 3000);
+        }
+
+        public static void ExecuteVoiceCommand(PhraseRecognizedEventArgs args)
+        {
+            if (!Manager.GetIndex("Chain Voice Commands").enabled)
+            {
+                modPhrases.Stop();
+                mainPhrases.Start();
+                Coroutines.instance.StopCoroutine(timeoutCoroutine);
+            }
+
+            if (cancelKeywords.Contains(args.text))
+            {
+                CancelModRecognition(args.text);
+                return;
+            }
+
+            string modTarget = null;
+            bool exactMatch = false;
+
+            foreach (Module[] buttonlist in Manager.modules.Values)
+            {
+                if (exactMatch)
+                    break;
+
+                foreach (Module v in buttonlist)
+                {
+                    if (exactMatch)
+                        break;
+
+                    string buttonName = v.RenderName;
+
+                    if (buttonName.Contains(" <color"))
+                        buttonName = buttonName.Split(" <color")[0];
+
+                    if (args.text.ToLower() == buttonName.ToLower())
+                    {
+                        modTarget = v.name;
+                        exactMatch = true;
+                    }
+                    else
+                    {
+                        if (args.text.Contains(buttonName.ToLower()))
+                            modTarget = v.name;
+                    }
+                }
+            }
+
+            if (modTarget != null)
+            {
+                Module mod = Manager.GetIndex(modTarget);
+                Notifications.SendFormat(mod.enabled ? "red" : "green", "VOICE", (mod.enabled ? "Disabling " : "Enabling ") + (mod.RenderName) + "...", 3000);
+                if (dynamicSounds)
+                    LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/confirm.ogg", "Audio/Menu/confirm.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+
+#if LEGAL || LEGAL_DEBUG
+                if (!mod.legal)
+                    return;
+#endif
+                Toggle(modTarget, true, true);
+            }
+            else
+            {
+                Notifications.SendFormat("red", "VOICE", "No command found (" + args.text + ").", 3000);
+                if (dynamicSounds)
+                    LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/close.ogg", "Audio/Menu/close.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+            }
+        }
+
+        public static IEnumerator Timeout(string text)
+        {
+            yield return new WaitForSeconds(10f);
+            CancelModRecognition(text);
+        }
+
+        public static void CancelModRecognition(string text)
+        {
+            modPhrases.Stop();
+            mainPhrases.Start();
+            try
+            {
+                Coroutines.instance.StopCoroutine(timeoutCoroutine);
+            }
+            catch { }
+
+            Notifications.SendFormat("red", "VOICE", $"{(text == "i hate you" ? "I hate you too." : "Cancelling...")}", 3000);
+            if (dynamicSounds)
+                LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/close.ogg", "Audio/Menu/close.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+        }
+
+        public static void VoiceRecognitionOff()
+        {
+            mainPhrases?.Dispose();
+            mainPhrases?.Stop();
+            modPhrases?.Dispose();
+            modPhrases?.Stop();
+            mainPhrases = null;
+            modPhrases = null;
+            PhraseRecognitionSystem.Shutdown();
+        }
+
+        public static IEnumerator DictationOn()
+        {
+            Module mod = Manager.GetIndex("AI Assistant");
+
+            if (Application.platform == RuntimePlatform.WindowsPlayer && Environment.OSVersion.Version.Major < 10)
+                PromptSingle("Your version of Windows is too old for this mod to run.", () => mod.SetEnabled(false));
+            else if (Application.platform != RuntimePlatform.WindowsPlayer)
+                PromptSingle("You must be on Windows 10 or greater for this mod to run.", () => mod.SetEnabled(false));
+
+            Module vc = Manager.GetIndex("Voice Commands");
+            if (vc.enabled)
+                Prompt("You currently have Voice Commands enabled. These mods may overlap eachother. Would you like to disable it?", () => vc.SetEnabled(false), () => mod.SetEnabled(false));
+            else if (PhraseRecognitionSystem.Status != SpeechSystemStatus.Stopped)
+                PromptSingle("You can not use AI Assistant while you have another voice-related mod on.", () => mod.SetEnabled(false), "Ok");
+
+            if (!File.Exists($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt"))
+                File.WriteAllLines($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt", keyWords);
+            keyWords = File.ReadAllLines($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt");
+
+            while (PhraseRecognitionSystem.Status != SpeechSystemStatus.Stopped)
+                yield return null;
+
+            string[] kw = keyWords;
+            if (narratorName == "Mommy ASMR")
+                kw = kw.Concat(new[] { "mommy", "momma" }).ToArray();
+
+            krec = new KeywordRecognizer(kw);
+
+            krec.OnPhraseRecognized += (args) => Coroutines.instance.StartCoroutine(DictationRecognizer());
+            krec.Start();
+            yield break;
+        }
+
+        public static IEnumerator DictationRecognizer()
+        {
+            Module mod = Manager.GetIndex("AI Assistant");
+
+            PhraseRecognitionSystem.Shutdown();
+            while (PhraseRecognitionSystem.Status != SpeechSystemStatus.Stopped)
+                yield return null;
+
+            switch (narratorName)
+            {
+                case "Mommy ASMR":
+                    LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/TTS/yes_sweetheart.ogg", "Audio/TTS/yes_sweetheart.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+                    Notifications.SendFormat("#ffb6c1", "MOMMY", "Yes, sweetheart?", 3000);
+                    break;
+                default:
+                    LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/select.ogg", "Audio/Menu/select.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+                    Notifications.SendFormat("purple", "VOICE", "Listening...", 3000);
+                    break;
+            }
+
+            if (debugDictation)
+                Logs.Log("Dictation listening");
+
+            drec = new DictationRecognizer();
+            drec.DictationResult += (text, confidence) =>
+            {
+                if (LanguageModel.generating)
+                    return;
+
+                if (debugDictation)
+                    Logs.Log($"Dictation result: {text}");
+                if (cancelKeywords.Contains(text.ToLower()))
+                {
+                    if (dynamicSounds)
+                        LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/close.ogg", "Audio/Menu/close.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+
+                    Notifications.SendFormat("red", "AI", $"{(text.ToLower() == "i hate you" ? "I hate you too." : "Cancelling...")}", 3000);
+                    Coroutines.instance.StartCoroutine(DictationRestart());
+                    return;
+                }
+
+                switch (narratorName)
+                {
+                    case "Mommy ASMR":
+                        Notifications.SendFormat("#ffb6c1", "MOMMY", $"Let me get that for you..");
+                        break;
+                    default:
+                        Notifications.SendFormat("blue", "AI", $"Generating response..");
+                        break;
+                }
+
+                Coroutines.instance.StartCoroutine(LanguageModel.AskAI(text));
+                return;
+            };
+
+            drec.DictationComplete += (completionCause) =>
+            {
+                if (LanguageModel.generating)
+                    return;
+                if (debugDictation)
+                    Logs.Log($"completion cause: {completionCause}");
+                if (completionCause.ToString() == "TimeoutExceeded")
+                {
+                    if (dynamicSounds)
+                        LoadSoundFromURL($"{PluginInfo.ServerResourcePath}/Audio/Menu/close.ogg", "Audio/Menu/close.ogg", clip => DictationPlay(clip, buttonClickVolume / 10f));
+                    Notifications.SendFormat("red", "AI", $"Cancelling...", 3000);
+                }
+            };
+
+            drec.DictationError += (error, hresult) =>
+            {
+                if (debugDictation)
+                    Logs.LogError($"Dictation error: {error}");
+                if (error.Contains("Dictation support is not enabled on this device"))
+                {
+                    DictationOff();
+
+                    Notifications.SendFormat("red", "ERROR", $"Online Speech Recognition is not enabled on this device. Either open the menu to enable it, or check your internet connection.", 3000);
+                    Prompt("Online Speech Recognition is not enabled on your device. Would you like to open the Settings page to enable it?", () => { Files.Start("ms-settings:privacy-speech"); PromptSingle("Once you enable Online Speech Recognition, turn this mod back on!", () => mod.SetEnabled(false), "Ok"); }, () => PromptSingle("You will not be able to use this mod until you enable Online Speech Recognition.", () => mod.SetEnabled(false), "Ok"));
+                }
+            };
+
+            drec.DictationHypothesis += (text) =>
+            {
+                if (LanguageModel.generating)
+                    return;
+                if (debugDictation)
+                    Logs.Log($"Hypothesis: {text}");
+
+                Notifications.Clear();
+                Notifications.SendFormat("green", "VOICE", $"{text}");
+            };
+
+            drec?.Start();
+            yield break;
+        }
+
+        public static IEnumerator DictationRestart()
+        {
+            DictationOff();
+            while (PhraseRecognitionSystem.Status != SpeechSystemStatus.Stopped)
+                yield return null;
+            Coroutines.instance.StartCoroutine(DictationOn());
+            yield break;
+        }
+        public static void DictationOff()
+        {
+            drec?.Dispose();
+            drec?.Stop();
+            drec = null;
+            PhraseRecognitionSystem.Shutdown();
+        }
+
+        public static void DictationPlay(AudioClip clip, float volume)
+        {
+            bool enabled = Manager.GetIndex("Global Dynamic Sounds").enabled;
+            switch (enabled)
+            {
+                case true:
+                    Fun.PlayAudio(clip);
+                    break;
+                case false:
+                    Play2DAudio(clip, volume);
+                    break;
+            }
+        }
+
+        public static void ReloadOnCategoryChange() =>
+            ReloadMenu();
+
+        public static void EnableClickGUI()
+        {
+            clickGUI = true;
+            ReloadMenu();
+
+            Manager.OnCategoryChanged += ReloadOnCategoryChange;
+        }
+
+        public static void DisableClickGUI()
+        {
+            clickGUI = false;
+            Manager.OnCategoryChanged -= ReloadOnCategoryChange;
+
+            if (clickGuiLine != null)
+            {
+                Object.Destroy(clickGuiLine.gameObject);
+                clickGuiLine = null;
+            }
+        }
+
+        public static void InitializeClickGUI()
+        {
+            canvas = menu.transform.Find("Canvas").GetComponent<Canvas>();
+
+            if (!XRSettings.isDeviceActive)
+            {
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvas.sortingOrder = 1;
+
+                canvas.gameObject.transform.Find("Main").AddComponent<UIDragWindow>();
+            }
+
+            Transform canvasTransform = canvas.gameObject.transform;
+            canvasTransform.Find("Main").AddComponent<UIColors>().colors = backgroundColor;
+
+            ExtGradient sidebarColor = buttonColors[1].Clone();
+            for (int i = 0; i < sidebarColor.colors.Length; i++)
+            {
+                GradientColorKey colorKey = sidebarColor.colors[i];
+                sidebarColor.colors[i] = new GradientColorKey { time = colorKey.time, color = DarkenColor(colorKey.color, 0.35f) };
+            }
+
+            canvasTransform.Find("Main/Sidebar").AddComponent<UIColors>().colors = sidebarColor;
+            canvasTransform.Find("Main/Separator").AddComponent<UIColors>().colors = buttonColors[1];
+
+            canvasTransform.Find("Main/Sidebar/Watermark").localRotation = Quaternion.Euler(0f, 0f, rockWatermark ? Mathf.Sin(Time.time * 2f) * 10f : 0f);
+
+            List<MaskableGraphic> toRecolor = new List<MaskableGraphic>();
+            foreach (string partName in new[]
+            {
+                "Main/Sidebar/Title",
+                "Main/Sidebar/Watermark",
+                "Main/Sidebar/Settings",
+                "Main/Sidebar/Players",
+                "Main/Sidebar/Friends",
+                "Main/Sidebar/Scroll View/Scrollbar Vertical/Sliding Area/Handle"
+            })
+                toRecolor.Add(canvasTransform.Find(partName).GetComponent<MaskableGraphic>());
+
+            Transform sidebarTransform = canvasTransform.Find("Main/Sidebar");
+            foreach (string buttonName in new[]
+            {
+                "Settings", "Players", "Friends"
+            })
+                sidebarTransform.Find(buttonName).GetComponent<Button>().onClick.AddListener(() =>
+                {
+                    Toggle(buttonName);
+                    Sounds.Play(Sounds.DefaultSounds["Button"]);
+                });
+
+            var selection = canvasTransform.Find("Main/Sidebar/Scroll View/Viewport/Content/Home/Selection");
+            selection.AddComponent<UIColors>().colors = buttonColors[1];
+
+            bool movedSelection = false;
+
+            string[] ignoreButtons = {
+                "Join Discord",
+                "Settings",
+                "Friends",
+                "Players",
+                "Favorite Mods",
+                "Enabled Mods",
+                "Room Mods",
+                "Important Mods",
+                "Safety Mods",
+                "Movement Mods",
+                "Gamemode Mods",
+                "Visual Mods",
+                "Fun Mods",
+                "Sound Mods",
+                "Projectile Mods",
+                "Master Mods",
+                "Overpowered Mods",
+                "Experimental Mods",
+                "Detected Mods",
+                "Achievements",
+                "Credits"
+            };
+
+            GameObject otherBase = canvasTransform.Find("Main/Sidebar/Scroll View/Viewport/Content/Other").gameObject;
+            foreach (Module button in Manager.modules["Main"])
+            {
+                if (!ignoreButtons.Contains(button.name))
+                {
+                    GameObject otherButton = Object.Instantiate(otherBase, canvasTransform.Find("Main/Sidebar/Scroll View/Viewport/Content"), false);
+                    otherButton.SetActive(true);
+                    otherButton.name = button.name;
+                    otherButton.transform.Find("Title").GetComponent<TextMeshProUGUI>().SafeSetText(button.name);
+                }
+            }
+
+            foreach (GameObject tab in canvasTransform.Find("Main/Sidebar/Scroll View/Viewport/Content").Children())
+            {
+                if (!tab.activeSelf)
+                    continue;
+
+                toRecolor.Add(tab.transform.Find("Title").GetComponent<MaskableGraphic>());
+                toRecolor.Add(tab.transform.Find("Image").GetComponent<MaskableGraphic>());
+
+                tab.AddComponent<UIColors>().colors = buttonColors[0];
+                tab.GetComponent<Button>().onClick.AddListener(() =>
+                {
+                    Toggle(Manager.modules["Main"].Where(button => button.name.StartsWith(tab.name)).FirstOrDefault() ?? Manager.GetIndex("Exit Settings"));
+                    Sounds.Play(Sounds.DefaultSounds["Button"]);
+                });
+
+                if (Manager.CurrentCategoryName.StartsWith(tab.name == "Home" ? "Main" : tab.name))
+                {
+                    movedSelection = true;
+                    selection.SetParent(tab.transform, false);
+                }
+                else
+                {
+                    tab.transform.Find("Title").GetComponent<RectTransform>().localPosition += Vector3.left * 10f;
+                    tab.transform.Find("Image").GetComponent<RectTransform>().localPosition += Vector3.left * 10f;
+                }
+            }
+
+            if (!movedSelection)
+                selection.gameObject.SetActive(false);
+
+            GameObject buttonTemplate = canvasTransform.Find("Main/Button").gameObject;
+            void AddButton(Transform parent, Module info)
+            {
+                static void UpdateButton(GameObject button, Module info)
+                {
+                    Transform transform = button.transform;
+                    string buttonText = info.RenderName;
+
+                    if (inputTextColor != "green")
+                        buttonText = buttonText.Replace(" <color=grey>[</color><color=green>", $" <color=grey>[</color><color={inputTextColor}>");
+
+                    buttonText = FixTMProTags(buttonText);
+                    buttonText = FollowMenuSettings(buttonText);
+
+                    transform.Find("Title").GetComponent<TextMeshProUGUI>().SafeSetText(buttonText);
+                    transform.Find("Title").GetComponent<TextMeshProUGUI>().spriteAsset = ButtonSpriteSheet;
+
+                    string toolTipText = info.toolTip;
+
+                    if (inputTextColor != "green")
+                        toolTipText = toolTipText.Replace("<color=green>", $"<color={inputTextColor}>");
+
+                    toolTipText = FixTMProTags(toolTipText);
+                    toolTipText = FollowMenuSettings(toolTipText);
+
+                    transform.Find("ToolTip").GetComponent<TextMeshProUGUI>().SafeSetText(toolTipText);
+
+                    transform.Find("Title").GetComponent<TextMeshProUGUI>().Chams();
+                    transform.Find("ToolTip").GetComponent<TextMeshProUGUI>().Chams();
+
+                    button.name = buttonText;
+
+                    if (info.label)
+                    {
+                        RectTransform title = transform.Find("Title").gameObject.GetComponent<RectTransform>();
+                        title.anchorMin = new Vector2(0.5f, 0.5f);
+                        title.anchorMax = new Vector2(0.5f, 0.5f);
+
+                        title.localPosition = new Vector3(0f, 0f, 0f);
+
+                        transform.Find("ToolTip").gameObject.SetActive(false);
+                        transform.Find("Toggle").gameObject.SetActive(false);
+                        transform.Find("Increment").gameObject.SetActive(false);
+                        transform.Find("Decrement").gameObject.SetActive(false);
+                    }
+                    else if (info.incremental)
+                    {
+                        transform.Find("Increment").gameObject.SetActive(true);
+                        transform.Find("Decrement").gameObject.SetActive(true);
+
+                        transform.Find("Increment").gameObject.GetOrAddComponent<UIColors>().colors = buttonColors[0];
+                        transform.Find("Decrement").gameObject.GetOrAddComponent<UIColors>().colors = buttonColors[0];
+
+                        transform.Find("Increment/Image").gameObject.GetOrAddComponent<UIColors>().colors = textColors[1];
+                        transform.Find("Decrement/Image").gameObject.GetOrAddComponent<UIColors>().colors = textColors[1];
+                    }
+                    else
+                    {
+                        transform.Find("Toggle").gameObject.SetActive(true);
+                        transform.Find("Toggle/Image").gameObject.SetActive(info.enabled);
+
+                        transform.Find("Toggle").gameObject.GetOrAddComponent<UIColors>().colors = info.enabled ? buttonColors[1] : buttonColors[0];
+                        transform.Find("Toggle/Image").gameObject.GetOrAddComponent<UIColors>().colors = info.enabled ? textColors[2] : textColors[1];
+                    }
+
+                    transform.Find("Title").AddComponent<UIColors>().colors = textColors[1];
+                    transform.Find("ToolTip").AddComponent<UIColors>().colors = textColors[1];
+                }
+
+                GameObject button = Object.Instantiate(buttonTemplate, parent, false);
+                button.SetActive(true);
+
+                ExtGradient buttonBackgroundColor = backgroundColor.Clone();
+                for (int i = 0; i < buttonBackgroundColor.colors.Length; i++)
+                {
+                    GradientColorKey colorKey = buttonBackgroundColor.colors[i];
+                    buttonBackgroundColor.colors[i] = new GradientColorKey { time = colorKey.time, color = DarkenColor(colorKey.color, 0.75f) };
+                }
+                button.AddComponent<UIColors>().colors = buttonBackgroundColor;
+
+                UpdateButton(button, info);
+
+                Transform transform = button.transform;
+                if (info.incremental)
+                {
+                    transform.Find("Increment").GetComponent<Button>().onClick.AddListener(() =>
+                    {
+                        ToggleIncremental(info.name, true);
+                        Sounds.Play(Sounds.DefaultSounds["Button"]);
+                        UpdateButton(button, info);
+                    });
+                    transform.Find("Decrement").GetComponent<Button>().onClick.AddListener(() =>
+                    {
+                        ToggleIncremental(info.name, false);
+                        Sounds.Play(Sounds.DefaultSounds["Button"]);
+                        UpdateButton(button, info);
+                    });
+                }
+                else
+                {
+                    transform.Find("Toggle").GetComponent<Button>().onClick.AddListener(() =>
+                    {
+                        Toggle(info);
+                        Sounds.Play(Sounds.DefaultSounds["Button"]);
+                        UpdateButton(button, info);
+                    });
+                }
+            }
+
+            if (CurrentPrompt != null)
+            {
+                canvasTransform.Find("Main/PromptTab").gameObject.SetActive(true);
+
+                foreach (string partName in new[]
+                    {
+                        "Main/PromptTab/Title",
+                        "Main/PromptTab/Accept/Text",
+                        "Main/PromptTab/Decline/Text"
+                    })
+                    toRecolor.Add(canvasTransform.Find(partName).GetComponent<MaskableGraphic>());
+
+                GameObject title = canvasTransform.Find("Main/PromptTab/Title").gameObject;
+                title.GetComponent<TextMeshProUGUI>().SafeSetText(CurrentPrompt.Message);
+
+                GameObject accept = canvasTransform.Find("Main/PromptTab/Accept").gameObject;
+                accept.transform.Find("Text").GetComponent<TextMeshProUGUI>().SafeSetText(CurrentPrompt.AcceptText);
+                accept.transform.Find("Text").GetComponent<TextMeshProUGUI>().Chams();
+                accept.GetOrAddComponent<UIColors>().colors = buttonColors[0];
+                accept.GetComponent<Button>().onClick.AddListener(() =>
+                {
+                    Toggle("Accept Prompt");
+                    Sounds.Play(Sounds.DefaultSounds["Button"]);
+                    ReloadMenu();
+                });
+
+                if (CurrentPrompt.DeclineText != null)
+                {
+                    GameObject decline = canvasTransform.Find("Main/PromptTab/Decline").gameObject;
+                    decline.transform.Find("Text").GetComponent<TextMeshProUGUI>().SafeSetText(CurrentPrompt.DeclineText);
+                    decline.GetOrAddComponent<UIColors>().colors = buttonColors[0];
+                    decline.GetComponent<Button>().onClick.AddListener(() =>
+                    {
+                        Toggle("Decline Prompt");
+                        Sounds.Play(Sounds.DefaultSounds["Button"]);
+                        ReloadMenu();
+                    });
+                }
+                else
+                {
+                    canvasTransform.Find("Main/PromptTab/Decline").gameObject.SetActive(false);
+
+                    RectTransform rectTransform = accept.GetComponent<RectTransform>();
+                    rectTransform.localPosition = new Vector3(title.GetComponent<RectTransform>().localPosition.x, rectTransform.localPosition.y, rectTransform.localPosition.z);
+                    rectTransform.localScale = new Vector3(rectTransform.localScale.y * 2.05f, rectTransform.localScale.y, rectTransform.localScale.z);
+
+                    accept.transform.Find("Text").GetComponent<RectTransform>().localScale = new Vector3(rectTransform.localScale.y / 2.05f, rectTransform.localScale.y, rectTransform.localScale.z);
+                }
+            }
+            else if (Manager.CurrentCategoryName == "Main")
+            {
+                canvasTransform.Find("Main/HomeTab").gameObject.SetActive(true);
+                canvasTransform.Find("Main/HomeTab/Title").GetComponent<TextMeshProUGUI>().SafeSetText($"Hey, {PhotonNetwork.NickName ?? "null"}!");
+
+                if (Manager.CurrentCategoryName == "Main")
+                {
+                    foreach (string partName in new[]
+                    {
+                        "Main/HomeTab/Title",
+                        "Main/HomeTab/EnabledTitle",
+                        "Main/HomeTab/FavoritesTitle",
+                        "Main/HomeTab/EnabledIcon",
+                        "Main/HomeTab/FavoritesIcon",
+                        "Main/HomeTab/Enabled/Viewport/Content/None",
+                        "Main/HomeTab/Favorites/Viewport/Content/None",
+                        "Main/HomeTab/Enabled/Scrollbar Vertical/Sliding Area/Handle",
+                        "Main/HomeTab/Favorites/Scrollbar Vertical/Sliding Area/Handle"
+                    })
+                        toRecolor.Add(canvasTransform.Find(partName).GetComponent<MaskableGraphic>());
+                }
+
+                Transform enabledModsTransform = canvasTransform.Find("Main/HomeTab/Enabled/Viewport/Content");
+
+                List<Module> enabledMods = new List<Module>();
+                foreach (KeyValuePair<string, Module[]> categoryEntry in Manager.modules)
+                {
+                    Module[] buttonList = categoryEntry.Value;
+                    enabledMods.AddRange(buttonList.Where(v => v.enabled && (!hideSettings || !categoryEntry.Key.Contains("Settings")) && (!hideMacros || !categoryEntry.Key.Contains("Macro"))));
+                }
+                enabledMods = enabledMods.OrderBy(v => v.RenderName).ToList();
+
+                if (enabledMods.Count > 0)
+                {
+                    canvasTransform.Find("Main/HomeTab/Enabled/Viewport/Content/None").gameObject.SetActive(false);
+                    foreach (Module info in enabledMods)
+                        AddButton(enabledModsTransform, info);
+                }
+
+                Transform favoritedModsTransform = canvasTransform.Find("Main/HomeTab/Favorites/Viewport/Content");
+                List<Module> favoriteMods = StringsToInfos(favorites.ToArray()).ToList();
+
+                if (favoriteMods.Count > 0)
+                    favoriteMods.RemoveAt(0);
+
+                if (favoriteMods.Count > 0)
+                {
+                    canvasTransform.Find("Main/HomeTab/Favorites/Viewport/Content/None").gameObject.SetActive(false);
+                    foreach (Module info in favoriteMods)
+                        AddButton(favoritedModsTransform, info);
+                }
+            }
+            else
+            {
+                canvasTransform.Find("Main/ModuleTab").gameObject.SetActive(true);
+
+                foreach (string partName in new[]
+                    {
+                        "Main/ModuleTab/Search/SearchIcon",
+                        "Main/ModuleTab/Search/Text Area/Placeholder",
+                        "Main/ModuleTab/Search/Text Area/Text",
+                        "Main/ModuleTab/Modules/Scrollbar Vertical/Sliding Area/Handle"
+                    })
+                    toRecolor.Add(canvasTransform.Find(partName).GetComponent<MaskableGraphic>());
+
+                List<Module> buttons = Manager.modules[Manager.CurrentCategoryName].ToList();
+
+                if (buttons.Count > 0 && ignoreButtons.Contains(Manager.CurrentCategoryName))
+                    buttons.RemoveAt(0);
+
+                if (buttons.Count > 0)
+                {
+                    Transform modulesTransform = canvasTransform.Find("Main/ModuleTab/Modules/Viewport/Content");
+                    foreach (Module button in buttons)
+                        AddButton(modulesTransform, button);
+                }
+
+                Transform searchBar = canvasTransform.Find("Main/ModuleTab/Search");
+                TMP_InputField inputField = searchBar.GetComponent<TMP_InputField>();
+
+                inputField.onSelect.AddListener(_ =>
+                {
+                    if (!isSearching)
+                        Search();
+                });
+
+                inputField.onDeselect.AddListener(_ =>
+                {
+                    if (isSearching && keyboardInput.IsNullOrEmpty())
+                        Search();
+                });
+            }
+
+            for (int i = 0; i < toRecolor.Count; i++)
+            {
+                MaskableGraphic graphic = toRecolor[i];
+                graphic.gameObject.AddComponent<UIColors>().colors = textColors[i <= 1 ? 0 : 1];
+
+                if (graphic is TMP_Text text)
+                    text.Chams();
+            }
+
+            ExtGradient buttonBackgroundColor = backgroundColor.Clone();
+            for (int i = 0; i < buttonBackgroundColor.colors.Length; i++)
+            {
+                GradientColorKey colorKey = buttonBackgroundColor.colors[i];
+                buttonBackgroundColor.colors[i] = new GradientColorKey { time = colorKey.time, color = DarkenColor(colorKey.color, 0.75f) };
+            }
+            canvasTransform.Find("Main/ModuleTab/Search").AddComponent<UIColors>().colors = buttonBackgroundColor;
+
+            Canvas.ForceUpdateCanvases();
+        }
+
+        public static void UpdateSearch()
+        {
+            Transform searchBar = canvas.transform.Find("Main/ModuleTab/Search");
+            TMP_InputField inputField = searchBar.GetComponent<TMP_InputField>();
+
+            inputField.text = keyboardInput;
+            foreach (GameObject button in canvas.transform.Find("Main/ModuleTab/Modules/Viewport/Content").Children())
+                button.SetActive(keyboardInput.IsNullOrEmpty() || button.name.ClearTags().Replace(" ", "").ToLower().Contains(keyboardInput.Replace(" ", "").ToLower()));
+        }
+
+        public static void ClickGUI()
+        {
+            if (menu == null)
+            {
+                if (clickGuiLine != null)
+                {
+                    Object.Destroy(clickGuiLine.gameObject);
+                    clickGuiLine = null;
+                }
+            }
+            else
+            {
+                canvas.transform.Find("Main/Sidebar/Watermark").localRotation = Quaternion.Euler(0f, 0f, rockWatermark ? Mathf.Sin(Time.time * 2f) * 10f : 0f);
+
+                if (isSearching && Manager.CurrentCategoryName != "Main")
+                {
+                    Transform searchBar = canvas.transform.Find("Main/ModuleTab/Search");
+                    TMP_InputField inputField = searchBar.GetComponent<TMP_InputField>();
+
+                    if (inputField.text != keyboardInput)
+                        UpdateSearch();
+                }
+
+                if (!XRSettings.isDeviceActive)
+                    return;
+
+                if (clickGuiLine == null)
+                {
+                    clickGuiLine = new GameObject("Qubit_ClickGUILine")
+                        .GetOrAddComponent<LineRenderer>();
+
+                    clickGuiLine.material = new Material(Shader.Find("GUI/Text Shader"));
+                    clickGuiLine.startWidth = 0.025f * (scaleWithPlayer ? References.Player.scale : 1f);
+                    clickGuiLine.endWidth = clickGuiLine.startWidth;
+                    clickGuiLine.useWorldSpace = true;
+                    clickGuiLine.positionCount = 2;
+
+                    if (smoothLines)
+                    {
+                        clickGuiLine.numCapVertices = 10;
+                        clickGuiLine.numCornerVertices = 5;
+                    }
+                }
+
+                clickGuiLine.startColor = backgroundColor.GetCurrentColor();
+                clickGuiLine.endColor = backgroundColor.GetCurrentColor(0.5f);
+
+                var uiRaycaster = canvas.GetComponent<GraphicRaycaster>();
+                eventSystem ??= EventSystem.current;
+
+                pointerData ??= new PointerEventData(eventSystem);
+
+                bool useLeft = rightHand || (bothHands && References.InputPoller.rightControllerSecondaryButton);
+
+                var (_, _, _, forward, _) = useLeft
+                    ? Controllers.GetTrueLeftHand()
+                    : Controllers.GetTrueRightHand();
+
+                Vector3 startPos = useLeft
+                    ? References.LeftHand.position
+                    : References.RightHand.position;
+
+                Vector3 direction = forward.normalized;
+
+                Vector3 screenPoint = Camera.main.WorldToScreenPoint(startPos + direction * 5f);
+                pointerData.position = screenPoint;
+
+                uiResults.Clear();
+                uiRaycaster.Raycast(pointerData, uiResults);
+
+                currentUI = uiResults.Count > 0 ? uiResults[0].gameObject : null;
+
+                Vector3 endPos = currentUI != null
+                    ? uiResults[0].worldPosition
+                    : startPos + direction * 5f;
+
+                clickGuiLine.SetPosition(0, startPos);
+                clickGuiLine.SetPosition(1, endPos);
+
+                bool trigger = useLeft ? leftTrigger > 0.5f : rightTrigger > 0.5f;
+                Vector2 currentPos = pointerData.position;
+                pointerData.delta = currentPos - lastPointerPos;
+                lastPointerPos = currentPos;
+
+                if (trigger && !lastTriggerClick && currentUI != null)
+                {
+                    GameObject targetUI = null;
+                    foreach (var result in uiResults)
+                    {
+                        var button = result.gameObject.GetComponent<Button>();
+                        var toggle = result.gameObject.GetComponent<Toggle>();
+                        var slider = result.gameObject.GetComponent<Slider>();
+                        var inputField = result.gameObject.GetComponent<TMP_InputField>();
+
+                        if (button != null || toggle != null || slider != null || inputField != null)
+                        {
+                            targetUI = result.gameObject;
+                            break;
+                        }
+                    }
+
+                    pressedUI = targetUI ?? currentUI;
+                    pointerData.pressPosition = currentPos;
+                    pointerData.pointerPressRaycast = uiResults[0];
+
+                    ExecuteEvents.Execute(pressedUI, pointerData, ExecuteEvents.pointerDownHandler);
+                    pointerData.pointerPress = pressedUI;
+
+                    isDragging = false;
+                    draggedUI = ExecuteEvents.GetEventHandler<IDragHandler>(currentUI);
+                    pointerData.pointerDrag = draggedUI ?? null;
+                }
+
+                switch (trigger)
+                {
+                    case true when draggedUI != null:
+                        {
+                            if (!isDragging)
+                            {
+                                if (Vector2.Distance(pointerData.pressPosition, currentPos) > 15f)
+                                {
+                                    isDragging = true;
+                                    ExecuteEvents.Execute(draggedUI, pointerData, ExecuteEvents.beginDragHandler);
+
+                                    if (pressedUI != null && pressedUI != draggedUI)
+                                    {
+                                        ExecuteEvents.Execute(pressedUI, pointerData, ExecuteEvents.pointerUpHandler);
+                                        pointerData.pointerPress = null;
+                                    }
+                                }
+                            }
+
+                            if (isDragging)
+                                ExecuteEvents.Execute(draggedUI, pointerData, ExecuteEvents.dragHandler);
+                            break;
+                        }
+                    case false when lastTriggerClick:
+                        {
+                            if (pressedUI != null && !isDragging)
+                            {
+                                ExecuteEvents.Execute(pressedUI, pointerData, ExecuteEvents.pointerUpHandler);
+                                ExecuteEvents.Execute(pressedUI, pointerData, ExecuteEvents.pointerClickHandler);
+                            }
+                            else if (pressedUI != null)
+                                ExecuteEvents.Execute(pressedUI, pointerData, ExecuteEvents.pointerUpHandler);
+
+                            if (isDragging && draggedUI != null)
+                                ExecuteEvents.Execute(draggedUI, pointerData, ExecuteEvents.endDragHandler);
+
+                            pressedUI = null;
+                            draggedUI = null;
+                            pointerData.pointerDrag = null;
+                            pointerData.pointerPress = null;
+                            isDragging = false;
+                            break;
+                        }
+                }
+
+                lastTriggerClick = trigger;
+            }
+        }
+        public static void PlayerSelect()
+        {
+            if (XRSettings.isDeviceActive)
+            {
+                bool leftHand = rightHand || (bothHands && References.InputPoller.rightControllerSecondaryButton);
+
+                var (_, _, _, forward, _) = leftHand ? Controllers.GetTrueLeftHand() : Controllers.GetTrueRightHand();
+                bool canSelect = Networking.InRoom && menu != null && reference != null && Vector3.Distance(menu.transform.position, reference.transform.position) > 0.5f;
+
+                if (canSelect)
+                {
+                    if (selectObject == null)
+                        selectObject = new GameObject("Qubit_PingLine");
+
+                    Color targetColor = Manager.GetIndex("Swap GUI Colors").enabled ? buttonColors[1].GetCurrentColor() : backgroundColor.GetCurrentColor();
+                    Color lineColor = targetColor;
+                    lineColor.a = 0.15f;
+
+                    LineRenderer pingLine = selectObject.GetOrAddComponent<LineRenderer>();
+                    pingLine.material.shader = Shader.Find("GUI/Text Shader");
+                    pingLine.startColor = lineColor;
+                    pingLine.endColor = lineColor;
+                    pingLine.startWidth = 0.025f * (scaleWithPlayer ? References.Player.scale : 1f);
+                    pingLine.endWidth = 0.025f * (scaleWithPlayer ? References.Player.scale : 1f);
+                    pingLine.positionCount = 2;
+                    pingLine.useWorldSpace = true;
+                    if (smoothLines)
+                    {
+                        pingLine.numCapVertices = 10;
+                        pingLine.numCornerVertices = 5;
+                    }
+
+                    Vector3 StartPosition = leftHand ? References.LeftHand.position : References.RightHand.position;
+                    Vector3 Direction = forward;
+
+                    Physics.SphereCast(StartPosition + Direction / 4f * (scaleWithPlayer ? References.Player.scale : 1f), 0.15f, Direction, out var Ray, 512f, NoInvisLayerMask());
+                    Vector3 EndPosition = Ray.point == Vector3.zero ? StartPosition + (Direction * 512f) : Ray.point;
+
+                    pingLine.SetPosition(0, StartPosition);
+                    pingLine.SetPosition(1, EndPosition);
+
+                    VRRig rigTarget = Ray.collider.GetComponentInParent<VRRig>();
+                    if (Ray.collider != null && rigTarget != null && !rigTarget.IsLocal())
+                    {
+                        if (lastTarget != null && lastTarget != rigTarget)
+                        {
+                            lastTarget.mainSkin.material.shader = Shader.Find("GorillaTag/UberShader");
+                            if (lastTarget.mainSkin.sharedMaterial.name.Contains("gorilla_body"))
+                                lastTarget.mainSkin.material.color = lastTarget.playerColor;
+
+                            lastTarget = null;
+                        }
+
+                        if (lastTarget == null)
+                        {
+                            Visual.FixRigMaterialESPColors(rigTarget);
+
+                            rigTarget.mainSkin.material.shader = Shader.Find("GUI/Text Shader");
+                            rigTarget.mainSkin.material.color = targetColor;
+
+                            References.Tagger.StartVibration(leftHand, References.Tagger.tagHapticStrength / 2f, 0.05f);
+
+                            lastTarget = rigTarget;
+                        }
+                        else
+                            lastTarget.mainSkin.material.color = targetColor;
+
+                        bool trigger = leftHand ? leftTrigger > 0.5f : rightTrigger > 0.5f;
+
+                        if (trigger && !lastTriggerSelect)
+                        {
+                            References.LocalRig.PlayHandTapLocal(50, leftHand, 0.4f);
+                            References.Tagger.StartVibration(leftHand, References.Tagger.tagHapticStrength / 2f, References.Tagger.tagHapticDuration / 2f);
+
+                            NavigatePlayer(GetPlayerFromVRRig(rigTarget));
+                            ReloadMenu();
+
+                            Notifications.SendFormat("green", "SUCCESS", $"Selected player {GetPlayerFromVRRig(rigTarget).NickName}.");
+                        }
+
+                        lastTriggerSelect = trigger;
+                    }
+                    else
+                    {
+                        if (lastTarget != null)
+                        {
+                            lastTarget.mainSkin.material.shader = Shader.Find("GorillaTag/UberShader");
+                            if (lastTarget.mainSkin.sharedMaterial.name.Contains("gorilla_body"))
+                                lastTarget.mainSkin.material.color = lastTarget.playerColor;
+
+                            lastTarget = null;
+                        }
+                    }
+                }
+                else
+                {
+                    if (selectObject != null)
+                    {
+                        Object.Destroy(selectObject);
+                        selectObject = null;
+                    }
+
+                    if (lastTarget != null)
+                    {
+                        lastTarget.mainSkin.material.shader = Shader.Find("GorillaTag/UberShader");
+                        if (lastTarget.mainSkin.sharedMaterial.name.Contains("gorilla_body"))
+                            lastTarget.mainSkin.material.color = lastTarget.playerColor;
+
+                        lastTarget = null;
+                    }
+
+                    lastTriggerSelect = false;
+                }
+            }
+        }
+
+        public static IEnumerator MenuIntroCoroutine()
+        {
+            if (Time.time < timeMenuStarted)
+                yield return new WaitForSeconds(1f);
+
+            float fps = 1f / Time.unscaledDeltaTime;
+            yield return new WaitUntil(() => { fps = Mathf.Lerp(fps, 1f / Time.unscaledDeltaTime, 0.1f); return fps > 30f; });
+
+            GameObject menuIntro = LoadObject<GameObject>("Intro");
+
+            menuIntro.transform.position = References.BodyCollider.transform.position;
+            menuIntro.transform.rotation = References.BodyCollider.transform.rotation;
+
+            VideoPlayer videoPlayer = menuIntro.transform.Find("Video").GetComponent<VideoPlayer>();
+            ParticleSystem particleSystem = menuIntro.transform.Find("Particles").GetComponent<ParticleSystem>();
+
+            Color backgroundColor = Color.white;
+            Fun.HueShift(Color.white);
+
+            var main = particleSystem.main;
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                Frontend.Settings.backgroundColor.GetColor(0)
+            );
+
+            void EndImmediately()
+            {
+                Fun.HueShift(Color.clear);
+                Object.Destroy(menuIntro);
+            }
+
+            float timeout = 0f;
+
+            while (!videoPlayer.isPrepared)
+            {
+                timeout += Time.deltaTime;
+                if (timeout > 5f)
+                {
+                    EndImmediately();
+                    yield break;
+                }
+                yield return null;
+            }
+
+            bool videoEnded = false;
+            videoPlayer.Play();
+            videoPlayer.loopPointReached += (_) => videoEnded = true;
+
+            yield return new WaitUntil(() => videoEnded);
+
+            float fadeEnd = Time.time + 1f;
+            Color transparentColor = backgroundColor;
+            transparentColor.a = 0f;
+
+            while (Time.time < fadeEnd)
+            {
+                float t = 1f - (fadeEnd - Time.time);
+                Fun.HueShift(Color.Lerp(backgroundColor, transparentColor, t));
+                videoPlayer.gameObject.GetComponent<Renderer>().material.color = Color.Lerp(Color.white, Color.clear, t);
+                main.startColor = new ParticleSystem.MinMaxGradient(
+                    Color.Lerp(main.startColor.color, Color.clear, t)
+                );
+
+                yield return null;
+            }
+
+            EndImmediately();
+        }
+
+        public static void MenuIntro() =>
+            Coroutines.instance.StartCoroutine(MenuIntroCoroutine());
+
+        public static void ResetVoiceCommandsKeywords()
+        {
+            if (!File.Exists($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt"))
+                File.WriteAllLines($"{PluginInfo.BaseDirectory}/Qubit_Keywords.txt", keyWords);
+        }
+
+        public static void ResetSystemPrompt()
+        {
+            if (!File.Exists($"{PluginInfo.BaseDirectory}/Qubit_SystemPrompt.txt"))
+                File.WriteAllText($"{PluginInfo.BaseDirectory}/Qubit_SystemPrompt.txt", LanguageModel.SystemPrompt);
+        }
+
+        public static string SavePreferencesToText()
+        {
+            string seperator = ";;";
+
+            string enabledtext = "";
+            foreach (Module[] buttonlist in Manager.modules.Values)
+            {
+                foreach (Module v in buttonlist)
+                {
+                    if (!v.detected && v.enabled && v.name != "Save Preferences")
+                    {
+                        if (enabledtext == "")
+                            enabledtext += v.name;
+                        else
+                            enabledtext += seperator + v.name;
+                    }
+                }
+            }
+
+            string favoritetext = "";
+            foreach (string fav in favorites)
+            {
+                if (favoritetext == "")
+                    favoritetext += fav;
+                else
+                    favoritetext += seperator + fav;
+            }
+
+            string[] settings = {
+                Movement.platformMode.ToString(),
+                Movement.platformShape.ToString(),
+                Movement.flySpeedCycle.ToString(),
+                Movement.longarmCycle.ToString(),
+                Movement.speedboostCycle.ToString(),
+                Projectile.ProjectileMode.ToString(),
+                Movement.timerPowerIndex.ToString(),
+                Projectile.shootCycle.ToString(),
+                pointerIndex.ToString(),
+                Tag.tagAuraIndex.ToString(),
+                notificationDecayTime.ToString(),
+                fontStyleType.ToString(),
+                arrowType.ToString(),
+                pcBackgroundIndex.ToString(),
+                Important.reconnectDelay.ToString(),
+                "0",
+                Sounds.DefaultSounds["Button"],
+                buttonClickVolume.ToString(),
+                Safety.antiReportRangeIndex.ToString(),
+                Tag.tagRangeIndex.ToString(),
+                Soundboard.BindMode.ToString(),
+                Movement.driveInt.ToString(),
+                langInd.ToString(),
+                inputTextColorInt.ToString(),
+                Movement.pullPowerInt.ToString(),
+                Sounds.DefaultSounds["Notification"],
+                Visual.PerformanceModeStepIndex.ToString(),
+                gunVariation.ToString(),
+                GunDirection.ToString(),
+                narratorIndex.ToString(),
+                Movement.predInt.ToString(),
+                gunLineQualityIndex.ToString(),
+                Projectile.projDebounceIndex.ToString(),
+                Fun.red.ToString(),
+                Fun.green.ToString(),
+                Fun.blue.ToString(),
+                Safety.rankIndex.ToString(),
+                Projectile.SnowballSize.ToString(),
+                Overpowered.lagIndex.ToString(),
+                Blocks.blockDebounceIndex.ToString(),
+                Fun.nameCycleIndex.ToString(),
+                menuScaleIndex.ToString(),
+                Audio.soundId.ToString(),
+                Fun.targetQuestScore.ToString(),
+                notificationScaleIndex.ToString(),
+                overlayScaleIndex.ToString(),
+                arraylistScaleIndex.ToString(),
+                ((int)MathF.Ceiling(playTime)).ToString(),
+                PhotonNetwork.LocalPlayer?.UserId ?? "null",
+                _pageSize.ToString(),
+                Projectile.snowballMultiplicationFactor.ToString(),
+                menuButtonIndex.ToString(),
+                Safety.targetElo.ToString(),
+                Safety.targetBadge.ToString(),
+                Movement.playspaceAbuseIndex.ToString(),
+                Movement.wallWalkStrengthIndex.ToString(),
+                Fun.headSpinIndex.ToString(),
+                Movement.macroPlaybackRangeIndex.ToString(),
+                joystickMenuPosition.ToString(),
+                Movement.multiplicationAmount.ToString(),
+                Fun.targetFOV.ToString(),
+                Projectile.targetProjectileIndex.ToString(),
+                Movement.fakeLagDelayIndex.ToString(),
+                "0",
+                characterDistance.ToString(),
+                Overpowered.lagTypeIndex.ToString(),
+                Overpowered.masterVisualizationType.ToString(),
+                Movement.targetHz.ToString(),
+                "0",
+                Fun.soundboardVolumeIndex.ToString(),
+                Fun.soundboardSpeedIndex.ToString(),
+                Sounds.DefaultSoundpack,
+                Soundboard.disableLocalSoundboard.ToString(),
+            };
+
+            string settingstext = string.Join(seperator, settings);
+
+            string bindingtext = "";
+            foreach (KeyValuePair<string, List<string>> Bind in ModBindings)
+            {
+                if (bindingtext != "")
+                    bindingtext += "~~";
+
+                string toAppend = Bind.Key;
+                foreach (string modName in Bind.Value)
+                    toAppend += seperator + modName;
+
+                bindingtext += toAppend;
+            }
+
+            string quickActionString = string.Join(seperator, quickActions);
+
+            string rebindingtext = "";
+            foreach (Module[] buttonlist in Manager.modules.Values)
+            {
+                foreach (Module v in buttonlist)
+                {
+                    if (v.rebindKey != null)
+                    {
+                        if (rebindingtext == "")
+                            rebindingtext += v.name + ";" + v.rebindKey;
+                        else
+                            rebindingtext += seperator + v.name + ";" + v.rebindKey;
+                    }
+                }
+            }
+
+            string skipButtonString = string.Join(seperator, skipButtons);
+
+            string finaltext =
+                enabledtext + "\n" +
+                favoritetext + "\n" +
+                settingstext + "\n" +
+                pageButtonType + "\n" +
+                themeType + "\n" +
+                fontCycle + "\n" +
+                bindingtext + "\n" +
+                quickActionString + "\n" +
+                rebindingtext + "\n" +
+                skipButtonString;
+
+            return finaltext;
+        }
+
+        [Obsolete("Replaced by Preferences.Save()")]
+        public static void SavePreferences() =>
+            Preferences.Save();
+
+        private static void Restore(string buttonName, object newValue)
+        {
+            Module button = Manager.GetIndex(buttonName);
+            if (button == null) return;
+
+            try
+            {
+                button.value = newValue;
+                button.onValueChanged?.Invoke();
+            }
+            catch (Exception e)
+            {
+                Logs.Log($"Failed to restore button '{buttonName}' to {newValue}. Just gonna leave it at the default ({e.Message})");
+            }
+        }
+
+        private static void RestoreCycle(string buttonName, int newValue) => Restore(buttonName, newValue);
+        private static void RestoreNamedCycle(string buttonName, string newValue) => Restore(buttonName, newValue);
+
+        public static void LoadPreferencesFromText(string text)
+        {
+            loadingPreferencesFrame = Time.frameCount;
+
+            Panic();
+            string[] textData = text.Split("\n");
+
+            string[] activebuttons = textData[0].Split(";;");
+            for (int index = 0; index < activebuttons.Length; index++)
+                Toggle(activebuttons[index]);
+
+            string[] favoritesarray = textData[1].Split(";;");
+            favorites.Clear();
+            foreach (string favorite in favoritesarray)
+                favorites.Add(favorite);
+
+            try
+            {
+                string[] data = textData[2].Split(";;");
+                Movement.platformMode = int.Parse(data[0]);
+                RestoreCycle("Change Platform Type", Movement.platformMode);
+
+                Movement.platformShape = int.Parse(data[1]);
+                RestoreCycle("Change Platform Shape", Movement.platformShape);
+
+                Movement.flySpeedCycle = int.Parse(data[2]);
+                RestoreCycle("Change Fly Speed", Movement.flySpeedCycle);
+
+                Movement.longarmCycle = int.Parse(data[3]);
+                RestoreCycle("Change Arm Length", Movement.longarmCycle);
+
+                Movement.speedboostCycle = int.Parse(data[4]);
+                RestoreCycle("Change Speed Boost Amount", Movement.speedboostCycle);
+
+                Projectile.ProjectileMode = int.Parse(data[5]);
+                RestoreCycle("Change Projectile", Projectile.ProjectileMode);
+
+                Movement.timerPowerIndex = int.Parse(data[6]);
+                RestoreCycle("Change Timer Speed", Movement.timerPowerIndex);
+
+                Projectile.shootCycle = int.Parse(data[7]);
+                RestoreCycle("Change Shoot Speed", Projectile.shootCycle);
+
+                pointerIndex = int.Parse(data[8]);
+                RestoreCycle("Change Pointer Position", pointerIndex);
+
+                Tag.tagAuraIndex = int.Parse(data[9]);
+                RestoreCycle("ctaRange", Tag.tagAuraIndex);
+
+                notificationDecayTime = int.Parse(data[10]);
+                RestoreCycle("Change Notification Time", notificationDecayTime / 1000);
+
+                fontStyleType = int.Parse(data[11]);
+                RestoreCycle("Change Font Style Type", fontStyleType);
+
+                arrowType = int.Parse(data[12]);
+                RestoreCycle("Change Arrow Type", arrowType);
+
+                pcBackgroundIndex = int.Parse(data[13]);
+                RestoreCycle("Change PC Menu Background", pcBackgroundIndex);
+
+                Important.reconnectDelay = int.Parse(data[14]);
+                RestoreCycle("Change Reconnect Time", Important.reconnectDelay);
+
+                Sounds.DefaultSounds["Button"] = data[16];
+                RestoreNamedCycle("Change Button Sound", data[16]);
+
+                buttonClickVolume = int.Parse(data[17]);
+                RestoreCycle("Change Button Volume", buttonClickVolume);
+
+                Safety.antiReportRangeIndex = int.Parse(data[18]);
+                RestoreCycle("Change Anti Report Distance", Safety.antiReportRangeIndex);
+
+                Tag.tagRangeIndex = int.Parse(data[19]);
+                RestoreCycle("ctrRange", Tag.tagRangeIndex);
+
+                Soundboard.BindMode = int.Parse(data[20]);
+                RestoreCycle("Sound Bindings", Soundboard.BindMode);
+
+                Movement.driveInt = int.Parse(data[21]);
+                RestoreCycle("cdSpeed", Movement.driveInt);
+
+                langInd = int.Parse(data[22]);
+                RestoreCycle("Change Menu Language", langInd);
+
+                inputTextColorInt = int.Parse(data[23]);
+                RestoreCycle("Change Input Text Color", inputTextColorInt);
+
+                Movement.pullPowerInt = int.Parse(data[24]);
+                RestoreCycle("Change Pull Mod Power", Movement.pullPowerInt);
+
+                Sounds.DefaultSounds["Notification"] = data[25];
+                RestoreNamedCycle("Change Notification Sound", data[25]);
+
+                Visual.PerformanceModeStepIndex = int.Parse(data[26]);
+                RestoreCycle("Change Performance Visual Step", Visual.PerformanceModeStepIndex);
+
+                gunVariation = int.Parse(data[27]);
+                RestoreCycle("Change Gun Variation", gunVariation);
+
+                GunDirection = int.Parse(data[28]);
+                RestoreCycle("Change Gun Direction", GunDirection);
+
+                narratorIndex = int.Parse(data[29]);
+                RestoreCycle("Change Narration Voice", narratorIndex);
+
+                Movement.predInt = int.Parse(data[30]);
+                RestoreCycle("Change Prediction Amount", Movement.predInt);
+
+                gunLineQualityIndex = int.Parse(data[31]);
+                RestoreCycle("Change Gun Line Quality", gunLineQualityIndex);
+
+                Fun.red = int.Parse(data[33]);
+                RestoreCycle("RedProj", Fun.red);
+
+                Fun.green = int.Parse(data[34]);
+                RestoreCycle("GreenProj", Fun.green);
+
+                Fun.blue = int.Parse(data[35]);
+                RestoreCycle("BlueProj", Fun.blue);
+
+                Safety.rankIndex = int.Parse(data[36]);
+                RestoreCycle("Change Ranked Tier", Safety.rankIndex);
+
+                Projectile.SnowballSize = int.Parse(data[37]);
+                RestoreCycle("Change Snowball Size", Projectile.SnowballSize);
+
+                Overpowered.lagIndex = int.Parse(data[38]);
+                RestoreCycle("Change Lag Power", Overpowered.lagIndex);
+
+                Blocks.blockDebounceIndex = int.Parse(data[39]);
+                RestoreCycle("Change Block Delay", Blocks.blockDebounceIndex);
+
+                Fun.nameCycleIndex = int.Parse(data[40]);
+                RestoreCycle("Change Cycle Delay", Fun.nameCycleIndex);
+
+                menuScaleIndex = int.Parse(data[41]);
+                RestoreCycle("Change Menu Scale", menuScaleIndex);
+
+                Audio.soundId = int.Parse(data[42]);
+                RestoreCycle("Custom Sound ID", Audio.soundId);
+
+                Fun.targetQuestScore = int.Parse(data[43]);
+                RestoreCycle("Change Custom Quest Score", Fun.targetQuestScore);
+
+                notificationScaleIndex = int.Parse(data[44]);
+                RestoreCycle("Change Notification Scale", notificationScaleIndex);
+
+                overlayScaleIndex = int.Parse(data[45]);
+                RestoreCycle("Change Overlay Scale", overlayScaleIndex);
+
+                arraylistScaleIndex = int.Parse(data[46]);
+                RestoreCycle("Change Arraylist Scale", arraylistScaleIndex);
+
+                playTime = int.Parse(data[47]);
+
+                Important.oldId = data[48];
+
+                _pageSize = int.Parse(data[49]);
+                RestoreCycle("Change Page Size", _pageSize);
+
+                Projectile.snowballMultiplicationFactor = int.Parse(data[50]);
+                RestoreCycle("Change Snowball Multiplication Factor", Projectile.snowballMultiplicationFactor);
+
+                menuButtonIndex = int.Parse(data[51]);
+                RestoreCycle("Change Menu Button", menuButtonIndex);
+
+                Safety.targetElo = int.Parse(data[52]);
+                RestoreCycle("Change ELO Value", Safety.targetElo);
+
+                Safety.targetBadge = int.Parse(data[53]);
+                RestoreCycle("Change Badge Tier", Safety.targetBadge);
+
+                Movement.playspaceAbuseIndex = int.Parse(data[54]);
+                RestoreCycle("Change Playspace Abuse Speed", Movement.playspaceAbuseIndex);
+
+                Movement.wallWalkStrengthIndex = int.Parse(data[55]);
+                RestoreCycle("Change Wall Walk Strength", Movement.wallWalkStrengthIndex);
+
+                Fun.headSpinIndex = int.Parse(data[56]);
+                RestoreCycle("Change Head Spin Speed", Fun.headSpinIndex);
+
+                Movement.macroPlaybackRangeIndex = int.Parse(data[57]);
+                RestoreCycle("Change Macro Playback Range", Movement.macroPlaybackRangeIndex);
+
+                joystickMenuPosition = int.Parse(data[58]);
+                RestoreCycle("Change Joystick Menu Position", joystickMenuPosition);
+
+                Movement.multiplicationAmount = int.Parse(data[59]);
+                RestoreCycle("Knockback Multiplication Amount", Movement.multiplicationAmount);
+
+                Fun.targetFOV = int.Parse(data[60]);
+                RestoreCycle("Change Target FOV", Fun.targetFOV);
+
+                Projectile.targetProjectileIndex = int.Parse(data[61]);
+                RestoreCycle("Change Projectile Index", Projectile.targetProjectileIndex);
+
+                Movement.fakeLagDelayIndex = int.Parse(data[62]);
+                RestoreCycle("Change Fake Lag Strength", Movement.fakeLagDelayIndex);
+
+                characterDistance = int.Parse(data[64]);
+                RestoreCycle("Change Character Distance", characterDistance);
+
+                Overpowered.lagTypeIndex = int.Parse(data[65]);
+                RestoreCycle("Change Lag Type", Overpowered.lagTypeIndex);
+
+                Overpowered.masterVisualizationType = int.Parse(data[66]);
+                RestoreCycle("Master Visualization Type", Overpowered.masterVisualizationType);
+
+                Movement.targetHz = int.Parse(data[67]);
+                RestoreCycle("Change Tinnitus Hertz", Movement.targetHz);
+
+                Fun.soundboardVolumeIndex = float.Parse(data[69]);
+                RestoreCycle("Change Soundboard Volume", (int)Fun.soundboardVolumeIndex);
+
+                Fun.soundboardSpeedIndex = float.Parse(data[70]);
+                RestoreCycle("Change Soundboard Speed", (int)Fun.soundboardSpeedIndex);
+
+                Module soundpack = Manager.GetIndex("Change Menu Soundpack");
+                RestoreNamedCycle("Change Menu Soundpack", data[71]);
+
+                Soundboard.disableLocalSoundboard = bool.Parse(data[72]);
+            }
+            catch (Exception e) { Logs.Log("Save file out of date: " + e); }
+
+            pageButtonType = int.Parse(textData[3]);
+            RestoreCycle("Change Page Type", pageButtonType);
+            themeType = int.Parse(textData[4]);
+            RestoreCycle("Change Menu Theme", themeType);
+            fontCycle = int.Parse(textData[5]);
+            RestoreCycle("Change Font Type", fontCycle);
+
+            try
+            {
+                foreach (string Bindings in textData[6].Split("~~"))
+                {
+                    if (Bindings.Contains(";;"))
+                    {
+                        string[] BindData = Bindings.Split(";;");
+                        string BindName = BindData[0];
+
+                        List<string> Binds = new List<string>();
+
+                        for (int i = 1; i < BindData.Length; i++)
+                        {
+                            string ModName = BindData[i];
+                            if (Manager.GetIndex(ModName) != null)
+                                Binds.Add(ModName);
+                        }
+
+                        ModBindings[BindName] = Binds;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                quickActions.Clear();
+                foreach (string quickAction in textData[7].Split(";;"))
+                {
+                    Module button = Manager.GetIndex(quickAction);
+                    if (button != null)
+                        quickActions.Add(quickAction);
+                }
+            }
+            catch { }
+
+            try
+            {
+                foreach (string bind in textData[8].Split(";;"))
+                {
+                    string rebindText = bind.Split(";")[0];
+                    string rebindKey = bind.Split(";")[1];
+                    Module button = Manager.GetIndex(rebindText);
+                    if (button != null)
+                        button.rebindKey = rebindKey;
+                }
+            }
+            catch { }
+
+            try
+            {
+                skipButtons.Clear();
+                foreach (string skipButton in textData[9].Split(";;"))
+                {
+                    Module button = Manager.GetIndex(skipButton);
+                    if (button != null)
+                        skipButtons.Add(skipButton);
+                }
+            }
+            catch { }
+
+            hasLoadedPreferences = true;
+        }
+
+        public static void LoadPreferences() => Preferences.Load();
+
+        public static void Panic()
+        {
+            AnnoyingModeOff();
+            foreach (Module[] buttonlist in Manager.modules.Values)
+            {
+                foreach (Module v in buttonlist)
+                {
+                    if (v.enabled)
+                        Toggle(v.name);
+                }
+            }
+        }
+
+        public static void LoadPCControls()
+        {
+            string fileName = $"{PluginInfo.BaseDirectory}/Qubit_PCControls.txt";
+
+            if (File.Exists(fileName))
+            {
+                string data = File.ReadAllText(fileName);
+                string[] lines = data.Split('\n');
+                var defaults = new Dictionary<ControllerBinding, Key>(pcBindings);
+                pcBindings.Clear();
+
+                foreach (string line in lines)
+                {
+                    string finalLine = line.Trim();
+
+                    if (!finalLine.Contains(" - "))
+                        continue;
+
+                    string[] splitData = finalLine.Split(" - ");
+
+                    if (Enum.TryParse(splitData[1], out ControllerBinding binding) && Enum.TryParse(splitData[0], out Key key))
+                        pcBindings[binding] = key;
+                }
+
+                bool addedDefaults = false;
+                foreach (var pair in defaults)
+                {
+                    if (pcBindings.ContainsKey(pair.Key)) continue;
+                    pcBindings[pair.Key] = pair.Value;
+                    addedDefaults = true;
+                }
+
+                if (addedDefaults)
+                    File.WriteAllLines(fileName, pcBindings.Select(pair => $"{pair.Value} - {pair.Key}"));
+            }
+            else
+            {
+                var lines = new List<string>();
+
+                foreach (var pair in pcBindings)
+                    lines.Add($"{pair.Value} - {pair.Key}");
+
+                File.WriteAllLines(fileName, lines);
+            }
+        }
+
+        public static void ApplyReconnectTime(int index) => Important.reconnectDelay = index;
+
+        public static void ApplyButtonSound(string soundName)
+        {
+            Sounds.DefaultSounds["Button"] = soundName;
+            Manager.GetIndex("Change Button Sound").displayName =
+                $"Change Button Sound {Bracket("green", soundName)}";
+        }
+        public static void ChangeButtonSound(bool positive = true, bool fromMenu = false)
+        {
+            var buttonKeys = Sounds.SoundList["Buttons"].Keys.ToArray();
+
+            int index = Array.IndexOf(buttonKeys, Sounds.DefaultSounds["Button"]);
+            if (index < 0) index = 0;
+            index = ButtonHelper.Wrap(index, 0, buttonKeys.Length - 1, positive);
+
+            string newSound = buttonKeys[index];
+            ApplyButtonSound(newSound);
+            Manager.GetIndex("Change Button Sound").value = newSound;
+
+            if (!fromMenu) return;
+            if (References.LocalRig == null) return;
+            if (References.LocalRig.leftHandPlayer != null) References.LocalRig.leftHandPlayer.Stop();
+            if (References.LocalRig.rightHandPlayer != null) References.LocalRig.rightHandPlayer.Stop();
+
+            Sounds.Play(Sounds.DefaultSounds["Button"]);
+        }
+
+        public static void ApplyButtonVolume(int index) => buttonClickVolume = index;
+        public static void PreviewButtonVolume(bool positive)
+        {
+            if (References.LocalRig == null) return;
+            References.LocalRig.leftHandPlayer.Stop();
+            References.LocalRig.rightHandPlayer.Stop();
+            Sounds.Play(Sounds.DefaultSounds["Button"]);
+        }
+        public static void ApplyMenuSoundpack(string packName) => Sounds.DefaultSoundpack = packName;
+
+        public static void ConductDebug()
+        {
+            if (Time.time < Visual.debugUpdateTimer) return;
+            Visual.debugUpdateTimer = Time.time + 1f;
+
+            TextMeshPro title = GetObject("Environment Objects/LocalObjects_Prefab/TreeRoom/CodeOfConductHeadingText").GetComponent<TextMeshPro>();
+            TextMeshPro body = GetObject("Environment Objects/LocalObjects_Prefab/TreeRoom/COCBodyText_TitleData").GetComponent<TextMeshPro>();
+            title.text = "DEBUG INFO";
+            body.richText = true;
+            string text = "";
+            text += $"<color=blue><b>Qubit</b></color> {PluginInfo.Version}  <color=grey>|</color>  Users Online:  {ServerData.onlineUsers}" + "\\n \\n";
+            string red = "<color=red>" + MathF.Floor(PlayerPrefs.GetFloat("redValue") * 255f) + "</color>";
+            string green = ", <color=green>" + MathF.Floor(PlayerPrefs.GetFloat("greenValue") * 255f) + "</color>";
+            string blue = ", <color=blue>" + MathF.Floor(PlayerPrefs.GetFloat("blueValue") * 255f) + "</color>";
+            string redS = "<color=red>" + MathF.Round(PlayerPrefs.GetFloat("redValue") * 9f) + "</color>";
+            string greenS = ", <color=green>" + MathF.Round(PlayerPrefs.GetFloat("greenValue") * 9f) + "</color>";
+            string blueS = ", <color=blue>" + MathF.Round(PlayerPrefs.GetFloat("blueValue") * 9f) + "</color>";
+            text += "<color=green>Color</color><color=grey>:</color> " + red + green + blue + " <color=grey>[</color>" + redS + greenS + blueS + "<color=grey>]</color>\\n";
+            string master = Networking.InRoom && PhotonNetwork.IsMasterClient ? "<color=grey> [</color><color=red>Master</color><color=grey>]</color>" : "";
+            text += "<color=green>Name</color><color=grey>:</color> " + PhotonNetwork.LocalPlayer?.NickName + master + "\\n";
+            text += "<color=green>ID</color><color=grey>:</color> " + (Settings.hideId ? "Hidden" : PhotonNetwork.LocalPlayer?.UserId) + "\\n";
+            string clip = GUIUtility.systemCopyBuffer;
+            text += "<color=green>Clip</color><color=grey>:</color> " + (clip?.Length > 35 ? clip[..35] : clip) + "\\n";
+            text += lastDeltaTime + " <color=green>FPS</color> <color=grey>|</color> " + PhotonNetwork.GetPing() + " <color=green>Ping</color>\\n";
+            string room = Networking.InRoom ? ManagerRegistry.NetworkSystem.SessionIsPrivate ? "Private" : "Public" : "Not in room";
+            text += "<color=green>" + ManagerRegistry.NetworkSystem.regionNames[ManagerRegistry.NetworkSystem.currentRegionIndex].ToUpper() + "</color> " + PhotonNetwork.PlayerList.Length + " <color=green>Players</color> <color=grey>|</color> " + room + "\\n \\n";
+            string admin = "";
+            if (Time.time > 5f)
+            {
+                if (ServerData.Administrators.TryGetValue(PhotonNetwork.LocalPlayer?.UserId ?? string.Empty, out var administrator))
+                    admin = " <color=grey>|</color> <color=red>Console " + (ServerData.SuperAdministrators.Contains(administrator) ? "Super " : "") + "Admin</color>";
+            }
+            text += "<color=green>Theme</color> " + themeType + admin + "\n";
+            text += "<color=green>Preferences Directory</color><color=grey>:</color> " + $"{Files.GetGamePath()}/{PluginInfo.BaseDirectory}";
+            body.SafeSetText(text);
+        }
+
+        [RunOnLaunch(LaunchPriority.PCControls)]
+        public static void InitializePCControls()
+        {
+            try
+            {
+                LoadPCControls();
+            }
+            catch (Exception exc)
+            {
+                Logs.LogError(
+                $"Error with Settings.LoadPCControls() at {exc.StackTrace}: {exc.Message}");
+            }
+        }
+        #endregion
+    }
+}

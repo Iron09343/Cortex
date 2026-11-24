@@ -1,0 +1,102 @@
+﻿/*
+ * Qubit Menu  Extensions/PhotonViews.cs
+ * A community driven mod menu for Gorilla Tag with over 1000+ mods
+ *
+ * Copyright (C) 2026  Qubit Software  /Derivative work of Seralyth Software, Goldentrophy Software
+ * https://github.com/QubitGT/Qubit
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using ExitGames.Client.Photon;
+using Photon.Pun;
+using Photon.Realtime;
+using Qubit.Core;
+using System;
+using System.Linq;
+using static Qubit.Libraries.Networking.Serialization;
+
+namespace Qubit.Extensions
+{
+    public static class PhotonViews
+    {
+        public static void RPC(this PhotonView view, string methodName, object target, params object[] parameters)
+        {
+            switch (target)
+            {
+                case RpcTarget rpcTarget:
+                    view.RPC(methodName, rpcTarget, parameters);
+                    break;
+                case Player player:
+                    view.RPC(methodName, player, parameters);
+                    break;
+            }
+        }
+        public static bool RPC(this PhotonView photonView, string methodName, RaiseEventOptions options, params object[] parameters)
+        {
+            if (photonView != null && parameters != null && !string.IsNullOrEmpty(methodName))
+            {
+                Hashtable rpcData = new Hashtable
+                {
+                    { 0, photonView.ViewID },
+                    { 2, PhotonNetwork.ServerTimestamp },
+                    { 3, methodName },
+                    { 4, parameters }
+                };
+
+                if (photonView.Prefix > 0)
+                    rpcData[1] = (short)photonView.Prefix;
+
+                if (PhotonNetwork.PhotonServerSettings.RpcList.Contains(methodName))
+                    rpcData[5] = (byte)PhotonNetwork.PhotonServerSettings.RpcList.IndexOf(methodName);
+
+                if (options.Receivers == ReceiverGroup.All || (options.TargetActors != null && options.TargetActors.Contains(Networking.LocalPlayer.ActorNumber)))
+                {
+                    if (options.Receivers == ReceiverGroup.All)
+                        options.Receivers = ReceiverGroup.Others;
+
+                    if (options.TargetActors != null && options.TargetActors.Contains(Networking.LocalPlayer.ActorNumber))
+                        options.TargetActors = options.TargetActors.Where(id => id != Networking.LocalPlayer.ActorNumber).ToArray();
+
+                    PhotonNetwork.ExecuteRpc(rpcData, PhotonNetwork.LocalPlayer);
+                }
+
+                else
+                {
+                    ManagerRegistry.NetworkingClient.LoadBalancingPeer.OpRaiseEvent(Photon.Pun.PunEvent.RPC, rpcData, options, new SendOptions
+                    {
+                        Reliability = true,
+                        DeliveryMode = DeliveryMode.ReliableUnsequenced,
+                        Encrypt = false
+                    });
+                }
+            }
+            return false;
+        }
+        public static bool CanCallNow(this FXSystemSettings settings, int index, float? time = null) =>
+            settings.GetCallLimiter(index).CanCallNow(time, settings.GetCallLimitType(index).UseNetWorkTime);
+
+        public static float GetDelay(this FXSystemSettings settings, int index) =>
+            settings.GetCallLimiter(index).GetDelay(settings.GetCallLimitType(index).UseNetWorkTime);
+
+        public static CallLimiter GetCallLimiter(this FXSystemSettings settings, int index) =>
+            settings.callSettings[index].CallLimitSettings;
+
+        public static CallLimitType<CallLimiter> GetCallLimitType(this FXSystemSettings settings, int index) =>
+            settings.callSettings[index];
+
+        public static void Serialize(this PhotonView view, Photon.Realtime.RaiseEventOptions options = null, int timeOffset = 0) =>
+            SendSerialize(view, options, timeOffset);
+    }
+}

@@ -1,0 +1,1190 @@
+﻿/*
+ * Qubit Menu  Libraries/Entities/Blocks.cs
+ * A community driven mod menu for Gorilla Tag with over 1000+ mods
+ *
+ * Copyright (C) 2026  Qubit Software  /Derivative work of Seralyth Software, Goldentrophy Software
+ * https://github.com/QubitGT/Qubit
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using GorillaTagScripts;
+using Ionic.Zlib;
+using Photon.Pun;
+using Photon.Realtime;
+using Qubit.Core;
+using Qubit.Extensions;
+using Qubit.Libraries.Core;
+using Qubit.Libraries.Interface;
+using Qubit.Modules.Classes;
+using Qubit.Patches.Building;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using UnityEngine;
+using static Qubit.Extensions.GameObj;
+using static Qubit.Extensions.Players;
+using static Qubit.Extensions.Random;
+using static Qubit.Frontend.Settings;
+using static Qubit.Libraries.Controls.Controllers;
+using static Qubit.Libraries.Networking.Serialization;
+using static Qubit.Modules.Categories.Fun;
+using static Qubit.Modules.Categories.Projectile;
+using static Qubit.Modules.Classes.GunLibrary;
+using Fun = Qubit.Modules.Categories.Fun;
+using Manager = Qubit.Modules.Manager;
+using Module = Qubit.Modules.Module;
+using Random = UnityEngine.Random;
+using Security = Qubit.Core.Security;
+
+namespace Qubit.Libraries.Entities
+{
+    public static class Blocks
+    {
+        public static int pieceIdSet = -566818631;
+        private static float blockDelay;
+
+        private static Dictionary<int, string> blocks;
+
+        public static float startTimeBuilding;
+
+        public static int blockDebounceIndex = 2;
+        public static float blockDebounce = 0.1f;
+
+        private static float noclipBuildingDelay;
+
+        public static int pieceId = -1;
+
+        private static readonly List<BuilderPiece> potentialgrabbedpieces = new List<BuilderPiece>();
+
+        public static void GiveBuilderWatch()
+        {
+            References.LocalRig.EnableBuilderResizeWatch(true);
+            Security.RPCProtection();
+        }
+
+        public static void RemoveBuilderWatch()
+        {
+            References.LocalRig.EnableBuilderResizeWatch(false);
+            Security.RPCProtection();
+        }
+        public static void BlocksGun()
+        {
+            GunLibrary.Point(NewPointer =>
+            {
+                CreatePiece(pieceIdSet, NewPointer.transform.position + Vector3.up * 0.1f, Quaternion.identity, 0);
+                Security.RPCProtection();
+            });
+        }
+        public static void SelectBlockGun()
+        {
+            GunLibrary.Aim(GunData =>
+            {
+                RaycastHit Ray = GunData.Ray;
+
+                if (GetGunInput(true))
+                {
+                    BuilderPiece gunTarget = Ray.collider.GetComponentInParent<BuilderPiece>();
+                    if (gunTarget && Time.time > gbgd)
+                    {
+                        gbgd = Time.time + 0.1f;
+                        pieceIdSet = gunTarget.pieceType;
+                        Notifications.SendFormat("green", "SUCCESS", "Successfully selected piece " + gunTarget.displayName + ".");
+                    }
+                }
+            });
+        }
+
+        public static void CopyBlockInfoGun()
+        {
+            GunLibrary.Aim(GunData =>
+            {
+                RaycastHit Ray = GunData.Ray;
+
+                if (GetGunInput(true))
+                {
+                    BuilderPiece gunTarget = Ray.collider.GetComponentInParent<BuilderPiece>();
+                    if (gunTarget && Time.time > gbgd)
+                    {
+                        gbgd = Time.time + 0.1f;
+                        GUIUtility.systemCopyBuffer = @$"{gunTarget.displayName}
+                Piece Type: {gunTarget.pieceType}
+                Piece Name: {gunTarget.name}";
+                        Notifications.SendFormat("green", "SUCCESS", "Successfully copied piece data of " + gunTarget.displayName + ".");
+                    }
+                }
+            });
+        }
+
+        public static void SelectBlock(int type, string name)
+        {
+            pieceIdSet = type;
+            Notifications.SendFormat("green", "SUCCESS", "Successfully selected piece " + name.Replace("(Clone)", "") + ".");
+        }
+        public static Dictionary<int, string> GetAllBlockData()
+        {
+            if (blocks == null)
+            {
+                if (ManagerRegistry.BuilderTable == null)
+                    return new Dictionary<int, string>();
+
+                blocks = new Dictionary<int, string>();
+                foreach (var piece in ManagerRegistry.BuilderTable.builderPool.piecePools.SelectMany(list => list))
+                {
+                    try
+                    {
+                        blocks.Add(piece.name.Replace("(Clone)", "").GetStaticHash(), piece.displayName ?? piece.displayName);
+                    }
+                    catch { }
+                }
+            }
+
+            return blocks;
+        }
+
+        public static int[] GetAllBlockTypes() =>
+            GetAllBlockData().Keys.ToArray();
+
+        public static int GetRandomBlockType()
+        {
+            int[] blockTypes = GetAllBlockTypes();
+            return blockTypes[Random.Range(0, blockTypes.Length)];
+        }
+
+        public static void BlockBrowser()
+        {
+            rememberdirectory = pageNumber;
+
+            Dictionary<int, string> allBlockData = GetAllBlockData();
+            List<Module> blockButtons = new List<Module> { new Module { name = "Exit Building Block Browser", method = RemoveCosmeticBrowser, isTogglable = false, toolTip = "Returns you back to the fun mods." } };
+
+            int i = 0;
+            foreach (KeyValuePair<int, string> block in allBlockData)
+            {
+                blockButtons.Add
+                (
+                    new Module
+                    {
+                        name = $"SelectBlock{i}",
+                        displayName = block.Value,
+                        method = () => SelectBlock(block.Key, block.Value),
+                        isTogglable = false,
+                        toolTip = $"Selects the block \"{block.Value}\" to be used for the building mods."
+                    }
+                );
+                i++;
+            }
+
+            Manager.modules["Temporary Category"] = blockButtons.ToArray();
+            Manager.CurrentCategoryName = "Temporary Category";
+        }
+
+        public static void SpamGrabBlocks()
+        {
+            if (rightGrab)
+            {
+                CreatePiece(pieceIdSet, References.RightHand.position, References.RightHand.rotation, 0);
+                Security.RPCProtection();
+            }
+        }
+
+        public static void BuildingBlockMinigun()
+        {
+            if (rightGrab)
+            {
+                CreatePiece(pieceIdSet, References.RightHand.position, References.RightHand.rotation, 0, null, false, false, GetGunDirection(References.RightHand) * ShootStrength);
+                Security.RPCProtection();
+            }
+        }
+        public static void DestroyBlocks()
+        {
+            if (Time.time > delayer)
+            {
+                delayer = Time.time + 0.3f;
+
+                BuilderPiece[] totalPieces = PhotonNetwork.IsMasterClient ? GetAllType<BuilderPiece>() :
+                    GetAllType<BuilderPiece>()
+                        .Where(piece => piece.gameObject.activeInHierarchy)
+                        .Where(piece => Vector3.Distance(piece.transform.position, References.LeftHand.position) < 2.5f).ToArray();
+
+                for (int i = 0; i < 100; i++)
+                {
+                    BuilderPiece piece = totalPieces[Random.Range(0, totalPieces.Length)];
+                    if (piece.gameObject.activeSelf)
+                        RecyclePiece(piece, true, 2);
+                }
+            }
+        }
+
+        public static void SaveBuilderTableData()
+        {
+            string fileName = $"{PluginInfo.BaseDirectory}/BuilderTableData.json";
+
+            File.WriteAllText(fileName, ManagerRegistry.BuilderTable.WriteTableToJson());
+
+            string filePath = Files.GetGamePath() + "/" + fileName;
+            Files.Start(filePath);
+        }
+
+        public static void LoadBuilderTableData()
+        {
+            string fileName = $"{PluginInfo.BaseDirectory}/BuilderTableData.json";
+
+            if (!File.Exists(fileName))
+                return;
+
+            string tableData = File.ReadAllText(fileName);
+            BuilderTable table = ManagerRegistry.BuilderTable;
+
+            table.tableData ??= new BuilderTableData();
+
+            table.SetIsDirty(false);
+            table.tableData.numEdits++;
+
+            tableData = Convert.ToBase64String(GZipStream.CompressString(tableData));
+            ManagerRegistry.SharedBlocksManager.OnSavePrivateScanSuccess += table.OnSaveScanSuccess;
+            ManagerRegistry.SharedBlocksManager.OnSavePrivateScanFailed += table.OnSaveScanFailure;
+            ManagerRegistry.SharedBlocksManager.RequestSavePrivateScan(table.currentSaveSlot, tableData);
+        }
+
+        public static void PlaceBlockGun()
+        {
+            GunLibrary.Aim(GunData =>
+            {
+                RaycastHit Ray = GunData.Ray;
+
+                if (GetGunInput(true))
+                {
+                    BuilderPiece gunTarget = Ray.collider.GetComponentInParent<BuilderPiece>();
+                    if (gunTarget)
+                    {
+                        PlacePiece(PiecePlacement._piece, gunTarget, PiecePlacement._bumpOffsetX, PiecePlacement._bumpOffsetZ, PiecePlacement._twist, PiecePlacement._parentPiece, PiecePlacement._attachIndex, PiecePlacement._parentAttachIndex);
+                        Security.RPCProtection();
+                    }
+                }
+            });
+        }
+
+        public static void DestroyBlockGun()
+        {
+            GunLibrary.Aim(GunData =>
+            {
+                RaycastHit Ray = GunData.Ray;
+
+                if (GetGunInput(true))
+                {
+                    BuilderPiece gunTarget = Ray.collider.GetComponentInParent<BuilderPiece>();
+                    if (gunTarget)
+                    {
+                        RecyclePiece(gunTarget, true, 2);
+                        Security.RPCProtection();
+                    }
+                }
+            });
+        }
+        public static void ApplyBlockDelay(int index)
+        {
+            blockDebounceIndex = index;
+            blockDebounce = index / 20f;
+        }
+
+        public static void CreatePiece(int pieceType, Vector3 position, Quaternion rotation, int materialType, object target = null, bool overrideFreeze = false, bool forceGravity = false, Vector3? velocity = null, Vector3? angVelocity = null)
+        {
+            if (Manager.GetIndex("Random Block Type").enabled)
+                pieceType = GetRandomBlockType();
+
+            BuilderTable table = ManagerRegistry.BuilderTable;
+            BuilderTableNetworking Networking = table.builderNetworking;
+            if (Qubit.Core.Networking.IsMasterClient)
+            {
+                if (Time.time > blockDelay)
+                {
+                    int pieceId = table.CreatePieceId();
+
+                    object[] args = {
+                        pieceType,
+                        pieceId,
+                        BitPackUtils.PackWorldPosForNetwork(position),
+                        BitPackUtils.PackQuaternionForNetwork(rotation),
+                        materialType,
+                        (byte)4,
+                        1,
+                        PhotonNetwork.LocalPlayer
+                    };
+
+                    switch (target)
+                    {
+                        case RpcTarget rpcTargetCreate:
+                            Networking.photonView.RPC("PieceCreatedByShelfRPC", rpcTargetCreate, args);
+                            break;
+                        case Player playerCreate:
+                            Networking.photonView.RPC("PieceCreatedByShelfRPC", playerCreate, args);
+                            break;
+                        default:
+                            Networking.photonView.RPC("PieceCreatedByShelfRPC", RpcTarget.All, args);
+                            break;
+                    }
+
+                    if ((!overrideFreeze && !Manager.GetIndex("Zero Gravity Blocks").enabled) || forceGravity)
+                    {
+                        blockDelay = Time.time + 0.02f;
+
+                        args = new object[]
+                        {
+                            Networking.CreateLocalCommandId(),
+                            pieceId,
+                            true,
+                            BitPackUtils.PackHandPosRotForNetwork(Vector3.zero, Quaternion.identity),
+                            PhotonNetwork.LocalPlayer
+                        };
+
+                        switch (target)
+                        {
+                            case RpcTarget rpcTargetGrab:
+                                Networking.photonView.RPC("PieceGrabbedRPC", rpcTargetGrab, args);
+                                break;
+                            case Player playerGrab:
+                                Networking.photonView.RPC("PieceGrabbedRPC", playerGrab, args);
+                                break;
+                            default:
+                                Networking.photonView.RPC("PieceGrabbedRPC", RpcTarget.All, args);
+                                break;
+                        }
+
+                        args = new object[]
+                        {
+                            Networking.CreateLocalCommandId(),
+                            pieceId,
+                            position,
+                            rotation,
+                            velocity ?? Vector3.zero,
+                            angVelocity ?? Vector3.zero,
+                            PhotonNetwork.LocalPlayer
+                        };
+
+                        switch (target)
+                        {
+                            case RpcTarget rpcTargetDrop:
+                                Networking.photonView.RPC("PieceDroppedRPC", rpcTargetDrop, args);
+                                break;
+                            case Player playerDrop:
+                                Networking.photonView.RPC("PieceDroppedRPC", playerDrop, args);
+                                break;
+                            default:
+                                Networking.photonView.RPC("PieceDroppedRPC", RpcTarget.All, args);
+                                break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                if (Time.time > blockDelay)
+                {
+                    blockDelay = Time.time + blockDebounce;
+                    BuilderPiece piece = (GetAllType<BuilderPiece>()
+                        .Where(piece => piece.gameObject.activeInHierarchy)
+                        .Where(piece => piece.pieceType == pieceType)
+                        .Where(piece => !piece.isBuiltIntoTable)
+                        .Where(piece => piece.CanPlayerGrabPiece(PhotonNetwork.LocalPlayer.ActorNumber, piece.transform.position))
+                        .Where(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos) < 2.5f)
+                        .OrderBy(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos))
+                        .FirstOrDefault()
+                        ?? null) ?? GetAllType<BuilderPiece>()
+                            .Where(piece => piece.gameObject.activeInHierarchy)
+                            .Where(piece => !piece.isBuiltIntoTable)
+                            .Where(piece => piece.CanPlayerGrabPiece(PhotonNetwork.LocalPlayer.ActorNumber, piece.transform.position))
+                            .Where(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos) < 2.5f)
+                            .OrderBy(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos))
+                            .FirstOrDefault()
+                            ?? null;
+
+                    if (piece == null)
+                        return;
+
+                    if (Vector3.Distance(ServerLeftHandPos, position) > 2.5f)
+                        position = ServerLeftHandPos + (position - ServerLeftHandPos).normalized * 2.5f;
+
+                    pieceId = piece.pieceId;
+
+                    Networking.RequestGrabPiece(piece, true, Vector3.zero, Quaternion.identity);
+                    Networking.RequestDropPiece(piece, position, rotation, velocity ?? Vector3.zero, angVelocity ?? Vector3.zero);
+                }
+            }
+        }
+
+        public static void GrabPiece(BuilderPiece piece, bool isLefHand, Vector3 localPosition, Quaternion localRotation)
+        {
+            BuilderTableNetworking Networking = ManagerRegistry.BuilderTable.builderNetworking;
+            if (Qubit.Core.Networking.IsMasterClient)
+            {
+                Networking.photonView.RPC("PieceGrabbedRPC", RpcTarget.All, Networking.CreateLocalCommandId(), piece.pieceId, isLefHand, BitPackUtils.PackHandPosRotForNetwork(localPosition, localRotation), PhotonNetwork.LocalPlayer);
+            }
+            else
+                Networking.RequestGrabPiece(piece, isLefHand, localPosition, localRotation);
+        }
+
+        public static void PlacePiece(BuilderPiece piece, BuilderPiece attachPiece, sbyte bumpOffsetX, sbyte bumpOffsetZ, byte twist, BuilderPiece parentPiece, int attachIndex, int parentAttachIndex)
+        {
+            if (attachPiece.isBuiltIntoTable)
+                return;
+
+            BuilderTableNetworking Networking = ManagerRegistry.BuilderTable.builderNetworking;
+            if (Qubit.Core.Networking.IsMasterClient)
+            {
+                Networking.photonView.RPC("PiecePlacedRPC", RpcTarget.All, Networking.CreateLocalCommandId(), piece.pieceId, attachPiece != null ? attachPiece.pieceId : -1, BuilderTable.PackPiecePlacement(twist, bumpOffsetX, bumpOffsetZ), parentPiece != null ? parentPiece.pieceId : -1, attachIndex, parentAttachIndex, PhotonNetwork.LocalPlayer, PhotonNetwork.ServerTimestamp);
+            }
+            else
+            {
+                Networking.RequestGrabPiece(piece, true, Vector3.zero, Quaternion.identity);
+                Networking.RequestPlacePiece(piece, attachPiece, bumpOffsetX, bumpOffsetZ, twist, parentPiece, attachIndex, parentAttachIndex);
+            }
+        }
+
+        public static void DropPiece(BuilderPiece piece, Vector3 position, Quaternion rotation, Vector3 velocity, Vector3 angVelocity)
+        {
+            BuilderTableNetworking Networking = ManagerRegistry.BuilderTable.builderNetworking;
+            if (Qubit.Core.Networking.IsMasterClient)
+            {
+                Networking.photonView.RPC("PieceDroppedRPC", RpcTarget.All, Networking.CreateLocalCommandId(), piece.pieceId, position, rotation, velocity, angVelocity, PhotonNetwork.LocalPlayer);
+            }
+            else
+                Networking.RequestDropPiece(piece, position, rotation, velocity, angVelocity);
+        }
+
+        public static void RecyclePiece(BuilderPiece piece, bool playFX, int recyclerID)
+        {
+            if (piece.isBuiltIntoTable)
+                return;
+
+            BuilderTable table = ManagerRegistry.BuilderTable;
+            BuilderTableNetworking Networking = table.builderNetworking;
+
+            if (Qubit.Core.Networking.IsMasterClient)
+            {
+                Networking.photonView.RPC("PieceDestroyedRPC", RpcTarget.All, piece.pieceId, BitPackUtils.PackWorldPosForNetwork(piece.transform.position), BitPackUtils.PackQuaternionForNetwork(piece.transform.rotation), playFX, (short)recyclerID);
+            }
+            else
+            {
+                if (Time.time > blockDelay)
+                {
+                    blockDelay = Time.time + blockDebounce;
+                    if (piece.CanPlayerGrabPiece(PhotonNetwork.LocalPlayer.ActorNumber, piece.transform.position) && Vector3.Distance(piece.transform.position, ServerLeftHandPos) < 2.5f)
+                    {
+                        BuilderDropZone dropZone = table.dropZones
+                            .Where(zone => (int)zone.dropType >= 1)
+                            .Where(zone => Vector3.Distance(zone.transform.position, ServerLeftHandPos) < 2.5f)
+                            .OrderBy(zone => Vector3.Distance(zone.transform.position, ServerLeftHandPos))
+                            .FirstOrDefault() ?? null;
+
+                        Vector3 dropPosition = dropZone != null ? dropZone.transform.position : ServerLeftHandPos + Vector3.down * 2f;
+
+                        GrabPiece(piece, true, Vector3.zero, Quaternion.identity);
+                        DropPiece(piece, dropPosition, RandomQuaternion(), Vector3.down * 20f, Vector3.zero);
+                    }
+                }
+            }
+        }
+
+        public static void BuildingBlockAura()
+        {
+            CreatePiece(pieceIdSet, References.LocalRig.transform.position + RandomVector3().normalized * 2f, Quaternion.identity, 0);
+            Security.RPCProtection();
+        }
+
+        public static void BuildingBlockTextGun()
+        {
+            TextGun.Render(Fun.textToRender, positions =>
+            {
+                foreach (Vector3 position in positions)
+                    CreatePiece(pieceIdSet, position, Quaternion.identity, 0);
+
+                Security.RPCProtection();
+            });
+        }
+
+        public static void RainBuildingBlocks()
+        {
+            CreatePiece(pieceIdSet, References.LocalRig.transform.position + new Vector3(Random.Range(-3f, 3f), 4f, Random.Range(-3f, 3f)), Quaternion.identity, 0);
+            Security.RPCProtection();
+        }
+
+        public static void BuildingBlockFountain()
+        {
+            CreatePiece(pieceIdSet, References.LocalRig.transform.position + Vector3.up * 3f, Quaternion.identity, 0, velocity: RandomVector3(15f));
+            Security.RPCProtection();
+        }
+
+        public static Vector3 trailLastPosition;
+
+        public static void BuildingBlockTrail()
+        {
+            Vector3 current = References.LocalRig.transform.position;
+            if (Vector3.Distance(current, trailLastPosition) < 0.3f) return;
+
+            trailLastPosition = current;
+            CreatePiece(pieceIdSet, current, Quaternion.identity, 0);
+            Security.RPCProtection();
+        }
+
+        public static void BuildingBlockFirework()
+        {
+            for (int i = 0; i < 14; i++)
+            {
+                float angle = i / 14f * Mathf.PI * 2f;
+                Vector3 velocity = Vector3.up * Random.Range(8f, 12f) + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * 3.5f;
+                CreatePiece(pieceIdSet, References.RightHand.position, Quaternion.identity, 0, velocity: velocity);
+            }
+            Security.RPCProtection();
+        }
+
+        public static void OrbitBlocks()
+        {
+            CreatePiece(pieceIdSet, References.HeadCollider.transform.position + new Vector3(MathF.Cos((float)Time.frameCount / 30), 0f, MathF.Sin((float)Time.frameCount / 30)), Quaternion.identity, 0);
+            Security.RPCProtection();
+        }
+
+        #region Igloo / Ellipsoid / Sphere / Suffocate / Float
+
+        private const int IglooPieceType = 439542361;
+        private const int FlingPieceType = -566818631;
+        private static int iglooRing;
+        private static float iglooAngle;
+        private static float iglooRadius = 0.23f;
+        private static float iglooRingDelay;
+        private static Vector3 iglooCenter = Vector3.zero;
+
+        private static readonly (float radius, float eulerX, float yOffset, float delay)[] IglooRings =
+        {
+            (0.5f, 0f, 0f, 0.8f),      // ring 2: base
+            (0.8f, 0f, 0f, 0.74f),     // ring 3
+            (0.74f, 71f, 0.186f, 0.74f), // ring 4
+            (0.372f, 130f, 0.6f, 0.74f), // ring 5
+            (0.015f, 150f, 0.91f, 0.095f), // ring 6: top
+        };
+
+        /// <summary>
+        /// Shoot someone to encase them in an igloo of blocks, or shoot the ground to build one there.
+        /// </summary>
+        public static void IglooGun()
+        {
+            GunLibrary.Target(gunTarget =>
+            {
+                if (iglooCenter == Vector3.zero)
+                    iglooCenter = new Vector3(gunTarget.transform.position.x, Mathf.Min(gunTarget.transform.position.y - 0.45f, Mathf.Min(gunTarget.leftHandTransform.position.y - 0.061f, gunTarget.rightHandTransform.position.y - 0.061f)), gunTarget.transform.position.z);
+                BuildIglooRing();
+            }, new GunLibrary.GunSettings { locks = true, onIdle = () => { iglooRing = 0; iglooCenter = Vector3.zero; } });
+        }
+
+        private static void BuildIglooRing()
+        {
+            if (Time.time > iglooRingDelay)
+            {
+                int ringIndex = iglooRing >= 2 ? iglooRing - 2 : 0;
+                if (ringIndex < IglooRings.Length)
+                {
+                    var ring = IglooRings[ringIndex];
+                    iglooRadius = ring.radius;
+                    iglooRingDelay = Time.time + ring.delay;
+                    iglooRing++;
+                    if (iglooRing > 6)
+                        iglooRing = 2;
+                }
+            }
+
+            iglooAngle += 13f * Time.deltaTime;
+            Vector3 position = new Vector3(iglooCenter.x + iglooRadius * Mathf.Cos(iglooAngle), iglooCenter.y, iglooCenter.z + iglooRadius * Mathf.Sin(iglooAngle));
+            int ringIdx = iglooRing >= 2 ? iglooRing - 2 : 0;
+            Quaternion rotation = Quaternion.LookRotation(iglooCenter - position);
+            if (ringIdx < IglooRings.Length)
+            {
+                rotation *= Quaternion.Euler(IglooRings[ringIdx].eulerX, 0f, 0f);
+                position.y += IglooRings[ringIdx].yOffset;
+            }
+            CreatePiece(IglooPieceType, position, rotation, 0, overrideFreeze: true);
+            Security.RPCProtection();
+        }
+
+        private static int ellipsoidAxis;
+        private static float ellipsoidDelay;
+
+        /// <summary>
+        /// Shoot and make circles of blocks along each axis at wherever your hand desires.
+        /// </summary>
+        public static void EllipsoidGun()
+        {
+            GunLibrary.Point(NewPointer =>
+            {
+                if (Time.time > ellipsoidDelay)
+                {
+                    ellipsoidDelay = Time.time + 0.5f;
+                    ellipsoidAxis++;
+                    if (ellipsoidAxis > 2)
+                        ellipsoidAxis = 0;
+                }
+
+                float angle = Time.frameCount / 20f;
+                Vector3 center = NewPointer.transform.position;
+                Vector3 offset = ellipsoidAxis == 0
+                    ? new Vector3(Mathf.Cos(angle) * 1.2f, Mathf.Sin(angle) * 0.5f, 0f)
+                    : ellipsoidAxis == 1
+                        ? new Vector3(0f, Mathf.Cos(angle) * 1.2f, Mathf.Sin(angle) * 0.5f)
+                        : new Vector3(Mathf.Sin(angle) * 0.5f, 0f, Mathf.Cos(angle) * 1.2f);
+
+                CreatePiece(pieceIdSet, center + offset, Quaternion.LookRotation(center - (center + offset)), 0, overrideFreeze: true);
+                Security.RPCProtection();
+            });
+        }
+
+        /// <summary>
+        /// Spawns blocks in a sphere around you. Requires master client.
+        /// </summary>
+        public static void BlockSphere()
+        {
+            Vector3 position = References.LocalRig.transform.position + Random.onUnitSphere;
+            CreatePiece(pieceIdSet, position, Quaternion.LookRotation(References.LocalRig.transform.position - position), 0, overrideFreeze: true);
+            Security.RPCProtection();
+        }
+
+        /// <summary>
+        /// Shoot and make blocks spawn in a sphere at wherever your hand desires. Requires master client.
+        /// </summary>
+        public static void BlockSphereGun()
+        {
+            GunLibrary.Point(NewPointer =>
+            {
+                Vector3 position = NewPointer.transform.position + new Vector3(0f, 1f, 0f) + Random.onUnitSphere * 0.55f;
+                CreatePiece(pieceIdSet, position, Quaternion.LookRotation(NewPointer.transform.position + new Vector3(0f, 1f, 0f) - position), 0, overrideFreeze: true);
+                Security.RPCProtection();
+            });
+        }
+
+        /// <summary>
+        /// Shoot someone and suffocate them with a frozen fling block at their body. Requires master client.
+        /// </summary>
+        public static void SuffocateGun()
+        {
+            GunLibrary.Target(gunTarget =>
+            {
+                CreatePiece(FlingPieceType, gunTarget.transform.position, Quaternion.Euler(Random.Range(0f, 360f), Random.Range(0f, 360f), Random.Range(0f, 360f)), 0, gunTarget.GetPlayer(), overrideFreeze: true);
+                Security.RPCProtection();
+            }, new GunLibrary.GunSettings { locks = true });
+        }
+
+        /// <summary>
+        /// Shoot someone and float them with a fling block under their feet. Requires master client.
+        /// </summary>
+        public static void FloatGun()
+        {
+            GunLibrary.Target(gunTarget =>
+            {
+                CreatePiece(FlingPieceType, gunTarget.transform.position + Vector3.down * 0.345f, Quaternion.Euler(0f, Random.Range(0f, 359f), 0f), 0, velocity: Vector3.up * 10f);
+                Security.RPCProtection();
+            }, new GunLibrary.GunSettings { locks = true });
+        }
+
+        #endregion
+        public static void NoclipBuilding()
+        {
+            if (Time.time > noclipBuildingDelay)
+                noclipBuildingDelay = Time.time + 5f;
+            else
+                return;
+
+            foreach (BuilderPiece piece in GetAllType<BuilderPiece>().Where(block => block.gameObject.activeInHierarchy && !block.isBuiltIntoTable))
+                piece.SetColliderLayers(piece.colliders, BuilderTable.heldLayerLocal);
+        }
+
+        public static void DisableNoclipBuilding()
+        {
+            foreach (BuilderPiece piece in GetAllType<BuilderPiece>().Where(block => block.gameObject.activeInHierarchy && !block.isBuiltIntoTable))
+                piece.SetColliderLayers(piece.colliders, piece.state == BuilderPiece.State.AttachedAndPlaced ? BuilderTable.placedLayer : BuilderTable.droppedLayer);
+        }
+
+        public static void MultiGrab()
+        {
+            ManagerRegistry.BuilderPieceInteractor.handState[1] = BuilderPieceInteractor.HandState.Empty;
+            ManagerRegistry.BuilderPieceInteractor.heldPiece[1] = null;
+        }
+        public static IEnumerator CreateGetPiece(int pieceType, Action<BuilderPiece> onComplete)
+        {
+            PieceCreation.enabled = true;
+            PieceCreation.pieceTypeSearch = pieceType;
+
+            yield return null;
+
+            CreatePiece(pieceType, References.LocalRig.transform.position + Vector3.up, Quaternion.identity, 0, null, true);
+            Security.RPCProtection();
+
+            while (pieceId < 0)
+                yield return null;
+
+            yield return null;
+
+            pieceId = -1;
+            PieceCreation.enabled = false;
+            PieceCreation.pieceTypeSearch = 0;
+
+            onComplete?.Invoke(ManagerRegistry.BuilderTable.GetPiece(pieceId));
+        }
+
+        public static IEnumerator CreateShotgun()
+        {
+            if (!Qubit.Core.Networking.IsMasterClient)
+            {
+                Notifications.SendFormat("red", "ERROR", "You are not master client.");
+                yield break;
+            }
+
+            BuilderPiece basea = null;
+
+            yield return CreateGetPiece(-1927069002, piece => basea = piece);
+            while (basea == null)
+                yield return null;
+
+            GrabPiece(basea, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+
+            ManagerRegistry.BuilderPieceInteractor.handState[1] = BuilderPieceInteractor.HandState.Empty;
+            ManagerRegistry.BuilderPieceInteractor.heldPiece[1] = null;
+            yield return null;
+
+            BuilderPiece base2a = null;
+
+            yield return CreateGetPiece(-1621444201, piece => base2a = piece);
+            while (base2a == null)
+                yield return null;
+
+            GrabPiece(base2a, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(base2a, base2a, 0, 0, 0, basea, 1, 0);
+            yield return null;
+
+            BuilderPiece slopea = null;
+
+            yield return CreateGetPiece(-993249117, piece => slopea = piece);
+            while (slopea == null)
+                yield return null;
+
+            GrabPiece(slopea, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(slopea, slopea, 0, 0, 2, base2a, 1, 0);
+            yield return null;
+
+            BuilderPiece trigger = null;
+
+            yield return CreateGetPiece(251444537, piece => trigger = piece);
+            while (trigger == null)
+                yield return null;
+
+            GrabPiece(trigger, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(trigger, trigger, -1, -2, 3, slopea, 1, 0);
+            yield return null;
+
+            BuilderPiece slopeb = null;
+
+            yield return CreateGetPiece(-993249117, piece => slopeb = piece);
+            while (slopeb == null)
+                yield return null;
+
+            GrabPiece(slopeb, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(basea, trigger, 0, -2, 3, slopeb, 1, 0);
+            yield return null;
+
+            BuilderPiece base2b = null;
+
+            yield return CreateGetPiece(-1621444201, piece => base2b = piece);
+            while (base2b == null)
+                yield return null;
+
+            GrabPiece(base2b, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(slopeb, slopeb, 0, 0, 2, base2b, 1, 0);
+            yield return null;
+
+            BuilderPiece baseb = null;
+
+            yield return CreateGetPiece(-1927069002, piece => baseb = piece);
+            while (baseb == null)
+                yield return null;
+
+            GrabPiece(baseb, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(base2b, base2b, 0, 0, 0, baseb, 1, 0);
+            yield return null;
+
+            BuilderPiece minislopeb = null;
+
+            yield return CreateGetPiece(1700655257, piece => minislopeb = piece);
+            while (minislopeb == null)
+                yield return null;
+
+            GrabPiece(minislopeb, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(baseb, slopea, 0, -3, 2, minislopeb, 2, 0);
+            yield return null;
+
+            BuilderPiece minislopea = null;
+
+            yield return CreateGetPiece(1700655257, piece => minislopea = piece);
+            while (minislopea == null)
+                yield return null;
+
+            GrabPiece(minislopea, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(minislopeb, slopeb, 0, -3, 2, minislopea, 2, 0);
+            yield return null;
+
+            BuilderPiece minislope2a = null;
+
+            yield return CreateGetPiece(1700655257, piece => minislope2a = piece);
+            while (minislope2a == null)
+                yield return null;
+
+            GrabPiece(minislope2a, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(minislopea, minislopeb, 0, 0, 2, minislope2a, 1, 0);
+            yield return null;
+
+            BuilderPiece minislope2b = null;
+
+            yield return CreateGetPiece(1700655257, piece => minislope2b = piece);
+            while (minislope2b == null)
+                yield return null;
+
+            GrabPiece(minislope2b, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(minislope2a, minislopea, 0, 0, 2, minislope2b, 1, 0);
+            yield return null;
+
+            BuilderPiece flatthinga = null;
+
+            yield return CreateGetPiece(477262573, piece => flatthinga = piece);
+            while (flatthinga == null)
+                yield return null;
+
+            GrabPiece(flatthinga, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(minislope2b, minislope2b, 0, -1, 2, flatthinga, 2, 0);
+            yield return null;
+
+            BuilderPiece flatthingb = null;
+
+            yield return CreateGetPiece(477262573, piece => flatthingb = piece);
+            while (flatthingb == null)
+                yield return null;
+
+            GrabPiece(flatthingb, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(flatthinga, minislope2a, 0, -1, 2, flatthingb, 2, 0);
+            yield return null;
+
+            BuilderPiece connectorthinga = null;
+
+            yield return CreateGetPiece(251444537, piece => connectorthinga = piece);
+            while (connectorthinga == null)
+                yield return null;
+
+            GrabPiece(connectorthinga, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(flatthingb, flatthinga, -1, 1, 3, connectorthinga, 1, 0);
+            yield return null;
+
+            BuilderPiece connectorthingb = null;
+
+            yield return CreateGetPiece(661312857, piece => connectorthingb = piece);
+            while (connectorthingb == null)
+                yield return null;
+
+            GrabPiece(connectorthingb, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(connectorthinga, connectorthinga, -1, 0, 1, connectorthingb, 1, 0);
+            yield return null;
+
+            BuilderPiece connectorthingc = null;
+
+            yield return CreateGetPiece(661312857, piece => connectorthingc = piece);
+            while (connectorthingc == null)
+                yield return null;
+
+            GrabPiece(connectorthingc, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(connectorthingb, connectorthinga, 0, 0, 1, connectorthingc, 1, 0);
+            yield return null;
+
+            BuilderPiece barrela = null;
+
+            yield return CreateGetPiece(661312857, piece => barrela = piece);
+            while (barrela == null)
+                yield return null;
+
+            GrabPiece(barrela, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(connectorthingc, connectorthingb, 0, 0, 1, barrela, 1, 0);
+            yield return null;
+
+            BuilderPiece barrelb = null;
+
+            yield return CreateGetPiece(661312857, piece => barrelb = piece);
+            while (barrelb == null)
+                yield return null;
+
+            GrabPiece(barrelb, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(barrela, barrela, 0, 0, 2, barrelb, 1, 0);
+            yield return null;
+
+            BuilderPiece scope = null;
+
+            yield return CreateGetPiece(-648273975, piece => scope = piece);
+            while (scope == null)
+                yield return null;
+
+            GrabPiece(scope, false, Vector3.zero, Quaternion.identity);
+            yield return null;
+            PlacePiece(barrelb, minislope2a, -2, 1, 3, scope, 1, 0);
+            yield return null;
+            DropPiece(scope, References.RightHand.position, Quaternion.identity, Vector3.zero, Vector3.zero);
+            yield return null;
+            GrabPiece(basea, false, new Vector3(-0.2f, 0.01f, -0.3f), new Quaternion(0f, 0.1f, 0.75f, -0.6f));
+            yield return null;
+        }
+
+        public static IEnumerator CreateMassiveBlock()
+        {
+            References.LocalRig.sizeManager.currentSizeLayerMaskValue = 2;
+            yield return new WaitForSeconds(0.6f);
+
+            BuilderPiece stupid = null;
+
+            yield return CreateGetPiece(pieceIdSet, piece => stupid = piece);
+            while (stupid == null)
+                yield return null;
+
+            GrabPiece(stupid, false, Vector3.zero, Quaternion.identity);
+
+            yield return new WaitForSeconds(0.2f);
+
+            References.LocalRig.sizeManager.currentSizeLayerMaskValue = 13;
+            yield return null;
+        }
+
+        public static void MassiveBlock()
+        {
+            if (rightGrab && !previousGripDown)
+                Coroutines.instance.StartCoroutine(CreateMassiveBlock());
+
+            previousGripDown = rightGrab;
+        }
+        public static void GrabAllBlocksNearby()
+        {
+            if (rightGrab && Time.time > blockDelay)
+            {
+                blockDelay = Time.time + blockDebounce;
+                BuilderPiece piece = GetAllType<BuilderPiece>()
+                    .Where(piece => piece.gameObject.activeInHierarchy)
+                    .Where(piece => !piece.isBuiltIntoTable)
+                    .Where(piece => piece.heldByPlayerActorNumber != PhotonNetwork.LocalPlayer.ActorNumber)
+                    .Where(piece => piece.CanPlayerGrabPiece(PhotonNetwork.LocalPlayer.ActorNumber, piece.transform.position))
+                    .Where(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos) < 2.5f)
+                    .OrderBy(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos))
+                    .FirstOrDefault();
+
+                if (piece == null)
+                    return;
+
+                GrabPiece(piece, false, Manager.GetIndex("No Random Position Grab").enabled ? Vector3.zero : RandomVector3(0.5f), Manager.GetIndex("No Random Rotation Grab").enabled ? Quaternion.identity : RandomQuaternion());
+                potentialgrabbedpieces.Add(piece);
+
+                Security.RPCProtection();
+            }
+
+            if (rightTrigger > 0.5f && Time.time > blockDelay)
+            {
+                int amount = 0;
+                blockDelay = Time.time + 0.3f;
+                foreach (BuilderPiece piece in GetAllType<BuilderPiece>().Where(piece => piece.gameObject.activeInHierarchy).Where(piece => piece.heldByPlayerActorNumber == PhotonNetwork.LocalPlayer.ActorNumber))
+                {
+                    if (amount > 100)
+                        break;
+
+                    amount++;
+
+                    DropPiece(piece, References.RightHand.position, References.RightHand.rotation, RandomVector3(19f), RandomVector3(19f));
+                }
+
+                potentialgrabbedpieces.Clear();
+                Security.RPCProtection();
+            }
+        }
+
+        public static void GrabAllSelectedNearby()
+        {
+            if (rightGrab && Time.time > blockDelay)
+            {
+                blockDelay = Time.time + blockDebounce;
+                BuilderPiece piece = GetAllType<BuilderPiece>()
+                    .Where(piece => piece.gameObject.activeInHierarchy)
+                    .Where(piece => piece.pieceType == pieceIdSet)
+                    .Where(piece => !piece.isBuiltIntoTable)
+                    .Where(piece => piece.heldByPlayerActorNumber != PhotonNetwork.LocalPlayer.ActorNumber)
+                    .Where(piece => piece.CanPlayerGrabPiece(PhotonNetwork.LocalPlayer.ActorNumber, piece.transform.position))
+                    .Where(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos) < 2.5f)
+                    .OrderBy(piece => Vector3.Distance(piece.transform.position, ServerLeftHandPos))
+                    .FirstOrDefault();
+
+                if (piece == null)
+                    return;
+
+                GrabPiece(piece, false, Manager.GetIndex("No Random Position Grab").enabled ? Vector3.zero : RandomVector3(0.5f), Manager.GetIndex("No Random Rotation Grab").enabled ? Quaternion.identity : RandomQuaternion());
+                potentialgrabbedpieces.Add(piece);
+
+                Security.RPCProtection();
+            }
+
+            if (rightTrigger > 0.5f && Time.time > blockDelay)
+            {
+                int amount = 0;
+                blockDelay = Time.time + 0.3f;
+                foreach (BuilderPiece piece in GetAllType<BuilderPiece>().Where(piece => piece.gameObject.activeInHierarchy).Where(piece => piece.heldByPlayerActorNumber == PhotonNetwork.LocalPlayer.ActorNumber))
+                {
+                    if (amount > 100)
+                        break;
+
+                    amount++;
+
+                    DropPiece(piece, References.RightHand.position, References.RightHand.rotation, RandomVector3(19f), RandomVector3(19f));
+                }
+
+                potentialgrabbedpieces.Clear();
+                Security.RPCProtection();
+            }
+        }
+
+        public static void UnlimitedBuilding()
+        {
+            ManagerRegistry.BuilderPieceInteractor.maxHoldablePieceStackCount = int.MaxValue;
+            UnlimitedPieces.enabled = true;
+        }
+
+        public static void DisableUnlimitedBuilding()
+        {
+            ManagerRegistry.BuilderPieceInteractor.maxHoldablePieceStackCount = 50;
+            UnlimitedPieces.enabled = false;
+        }
+
+        public static void BlockCrashGun()
+        {
+            GunLibrary.Aim(GunData =>
+            {
+                RaycastHit Ray = GunData.Ray;
+
+                if (gunLocked && lockTarget != null)
+                {
+                    if (!Qubit.Core.Networking.IsMasterClient) { Notifications.SendFormat("red", "ERROR", "You are not master client."); return; }
+                    Blocks.CreatePiece(1934114066, new Vector3(-127.6248f, 16.99441f, -217.2094f), Quaternion.identity, 0, NetPlayerToPlayer(lockTarget.GetPlayer()), false, true);
+                }
+                if (GetGunInput(true))
+                {
+                    VRRig gunTarget = Ray.collider.GetComponentInParent<VRRig>();
+                    if (gunTarget && !gunTarget.IsLocal())
+                    {
+                        gunLocked = true;
+                        lockTarget = gunTarget;
+                    }
+                }
+            }, new GunLibrary.GunSettings
+            {
+                onIdle = () =>
+                {
+                    if (gunLocked)
+                        gunLocked = false;
+                }
+            });
+        }
+
+        public static void BlockCrashAll()
+        {
+            if (rightTrigger > 0.5f)
+            {
+                if (!Qubit.Core.Networking.IsMasterClient) { Notifications.SendFormat("red", "ERROR", "You are not master client."); return; }
+                Blocks.CreatePiece(1934114066, new Vector3(-127.6248f, 16.99441f, -217.2094f), Quaternion.identity, 0, RpcTarget.Others, false, true);
+            }
+        }
+
+        public static void BlockCrashAllExcept()
+        {
+            if (rightTrigger > 0.5f && Time.time > blockCrashExceptDelay)
+            {
+                blockCrashExceptDelay = Time.time + 0.5f;
+                if (!Qubit.Core.Networking.IsMasterClient) { Notifications.SendFormat("red", "ERROR", "You are not master client."); return; }
+                foreach (VRRig rig in Players.ActiveRigs.Where(rig => !rig.IsLocal()))
+                    Blocks.CreatePiece(1934114066, new Vector3(-127.6248f, 16.99441f, -217.2094f), Quaternion.identity, 0, NetPlayerToPlayer(rig.GetPlayer()), false, true);
+            }
+        }
+        private static float blockCrashExceptDelay;
+
+        public static void BlockCrashOnTouch()
+        {
+            if (!Qubit.Core.Networking.IsMasterClient) return;
+
+            VRRig closest = GetClosestVRRig();
+            if (closest != null && !closest.IsLocal() && Vector3.Distance(References.LocalRig.transform.position, closest.transform.position) < 1f && Time.time > blockCrashExceptDelay)
+            {
+                blockCrashExceptDelay = Time.time + 0.5f;
+                Blocks.CreatePiece(1934114066, new Vector3(-127.6248f, 16.99441f, -217.2094f), Quaternion.identity, 0, NetPlayerToPlayer(closest.GetPlayer()), false, true);
+            }
+        }
+
+        public static void BlockCrashTouchGun()
+        {
+            GunLibrary.Target(gunTarget =>
+            {
+                if (!Qubit.Core.Networking.IsMasterClient) { Notifications.SendFormat("red", "ERROR", "You are not master client."); return; }
+                if (Time.time > blockCrashExceptDelay)
+                {
+                    blockCrashExceptDelay = Time.time + 0.5f;
+                    Blocks.CreatePiece(1934114066, new Vector3(-127.6248f, 16.99441f, -217.2094f), Quaternion.identity, 0, NetPlayerToPlayer(gunTarget.GetPlayer()), false, true);
+                }
+            }, new GunLibrary.GunSettings { when = () => Time.time > blockCrashExceptDelay });
+        }
+
+        public static void GiveBlockCrashTouch()
+        {
+            if (!Qubit.Core.Networking.IsMasterClient) { Notifications.SendFormat("red", "ERROR", "You are not master client."); return; }
+            Blocks.CreatePiece(1934114066, References.LocalRig.transform.position, Quaternion.identity, 0, RpcTarget.Others, false, true);
+        }
+
+        public static void BlockTrapGun()
+        {
+            GunLibrary.Target(gunTarget =>
+            {
+                if (!Qubit.Core.Networking.IsMasterClient) { Notifications.SendFormat("red", "ERROR", "You are not master client."); return; }
+                if (Time.time > blockCrashExceptDelay)
+                {
+                    blockCrashExceptDelay = Time.time + 0.3f;
+                    Vector3 basePos = gunTarget.transform.position;
+                    Blocks.CreatePiece(1934114066, basePos + Vector3.up * 2f, Quaternion.identity, 0, NetPlayerToPlayer(gunTarget.GetPlayer()), false, true);
+                    Blocks.CreatePiece(1934114066, basePos + Vector3.down * 2f, Quaternion.identity, 0, NetPlayerToPlayer(gunTarget.GetPlayer()), false, true);
+                    Blocks.CreatePiece(1934114066, basePos + Vector3.left * 2f, Quaternion.identity, 0, NetPlayerToPlayer(gunTarget.GetPlayer()), false, true);
+                    Blocks.CreatePiece(1934114066, basePos + Vector3.right * 2f, Quaternion.identity, 0, NetPlayerToPlayer(gunTarget.GetPlayer()), false, true);
+                }
+            }, new GunLibrary.GunSettings { when = () => Time.time > blockCrashExceptDelay });
+        }
+    }
+}
