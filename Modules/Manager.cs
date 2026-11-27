@@ -19,6 +19,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using ConsoleModss;
 using GorillaLocomotion;
 using GorillaTagScripts.ObstacleCourse;
 using HarmonyLib;
@@ -3000,7 +3001,6 @@ namespace Qubit.Modules
                 new Module { name = "Admin Lag All", method = Admin.AdminLagAll, toolTip = "Lags everyone using the menu.", legal = true},
                 new Module { name = "Admin Lag Spike Gun", method = Admin.AdminLagSpikeGun, toolTip = "Lag spikes whoever your hand desires if they're using the menu.", legal = true},
                 new Module { name = "Admin Lag Spike All", method = Admin.AdminLagSpikeAll, isTogglable = false, toolTip = "Lag spikes everyone using the menu.", legal = true},
-
                 new Module { name = "Admin Vibrate Gun", method = Admin.AdminVibrateGun, toolTip = "Vibrate whoever your hand desires if they're using the menu.", legal = true},
                 new Module { name = "Admin Vibrate All", method = Admin.AdminVibrateAll, isTogglable = false, toolTip = "Vibrates everyone using the menu.", legal = true},
 
@@ -4283,7 +4283,6 @@ namespace Qubit.Modules
         public static bool incrementalBoost;
         public static bool OverwriteKeybinds;
         public static bool disableFavoritingKeybind;
-
         [RunOnLaunch(LaunchPriority.ModuleTags)]
         public static void TagNewModules()
         {

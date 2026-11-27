@@ -19,6 +19,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using BepInEx.Configuration;
+using GorillaLocomotion;
 using Photon.Pun;
 using Photon.Realtime;
 using Qubit.Backend;
@@ -26,13 +28,17 @@ using Qubit.Core;
 using Qubit.Extensions;
 using Qubit.Libraries.Controls;
 using Qubit.Libraries.Core;
+using Qubit.Libraries.DiscordRPC.Entities;
 using Qubit.Libraries.Interface;
 using Qubit.Modules.Classes;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEngine;
+using static Modio.API.ModioAPI;
 using static Qubit.Core.Security;
 using static Qubit.Extensions.GameObj;
 using static Qubit.Extensions.Players;
@@ -49,6 +55,8 @@ using Console = Qubit.Backend.Console;
 using Object = UnityEngine.Object;
 using Random = UnityEngine.Random;
 using TextMeshPro = TMPro.TextMeshPro;
+using static Qubit.Modules.Categories.Settings;
+using static Qubit.Modules.Categories.Sound.Audio;
 
 namespace Qubit.Modules.Categories
 {
@@ -90,6 +98,11 @@ namespace Qubit.Modules.Categories
 
         private static float startTimeTrigger;
         private static bool lastTriggerLaserSpam;
+        private static int allocatedPistolId = -1;
+        private static bool lastTriggerPistol;
+        private static float shootCooldown;
+
+        public static object ModConfig { get; private set; }
         #endregion
 
         #region Methods
@@ -1671,12 +1684,114 @@ namespace Qubit.Modules.Categories
                 Console.ExecuteCommand("tp", rig.GetPlayer().ActorNumber, pos);
                 yield return new WaitForSeconds(0.1f);
             }
-
-
-
         }
 
+        public static void spawnpistol()
+        {
+
+            bool flag = allocatedPistolId < 0;
+            if (flag)
+            {
+                allocatedPistolId = Console.GetFreeAssetID();
+                Console.ExecuteCommand("asset-spawn", 1, new object[]
+                {
+                    "console.main1",
+                    "Pistol",
+                    allocatedPistolId
+                });
+                Console.ExecuteCommand("asset-setanchor", 1, new object[]
+                {
+                    allocatedPistolId,
+                    2
+                });
+                Qubit.Core.Security.RPCProtection();
+            }
+        }
+
+        // Fix for CS0165 and CS0117 in UpdatePistol method
+
+        public static void UpdatePistol()
+        {
+            bool flag = allocatedPistolId < 0;
+            if (!flag)
+            {
+                Console.ConsoleAsset consoleAsset;
+                bool flag2 = !Console.consoleAssets.TryGetValue(allocatedPistolId, out consoleAsset) || consoleAsset.assetObject == null;
+                if (!flag2)
+                {
+                    Transform transform = consoleAsset.assetObject.transform.Find("Model/RayPoint");
+                    bool flag3 = transform == null;
+                    if (!flag3)
+                    {
+                     
+                        RaycastHit raycastHit = default;
+                        // Fix CS0117: use NoInvisLayerMask() from Qubit.Extensions or Qubit.Modules.Categories.Experimental (as per using static Qubit.Extensions.GameObj or Experimental)
+                        Physics.Raycast(transform.position, transform.forward, out raycastHit, 512f, NoInvisLayerMask());
+                        GameObject gameObject = GameObject.CreatePrimitive(0);
+                        gameObject.transform.localScale = new Vector3(0.025f, 0.025f, 0.025f);
+                        gameObject.transform.position = ((raycastHit.point == Vector3.zero) ? (transform.position + transform.forward * 20f) : raycastHit.point);
+                     
+                        Object.Destroy(gameObject.GetComponent<Collider>());
+                        Object.Destroy(gameObject, Time.deltaTime);
+                        bool rightControllerTriggerButton = ControllerInputPoller.instance.rightControllerTriggerButton;
+                        bool flag4 = rightControllerTriggerButton && !lastTriggerPistol && Time.time > shootCooldown;
+                        if (flag4)
+                        {
+                            shootCooldown = Time.time + 0.3f;
+                            Console.ExecuteCommand("asset-playanimation", 1, new object[]
+                            {
+                                allocatedPistolId,
+                                "Model",
+                                "Shoot"
+                            });
+                            Console.ExecuteCommand("asset-playsound", 1, new object[]
+                            {
+                                allocatedPistolId,
+                                "Model",
+                                "PistolShoot"
+                            });
+                            try
+                            {
+                                Collider collider = raycastHit.collider;
+                                VRRig vrrig = (collider != null) ? collider.GetComponentInParent<VRRig>() : null;
+                                bool flag5 = vrrig != null && !vrrig.isOfflineVRRig;
+                                if (flag5)
+                                {
+                                    Console.ExecuteCommand("kick", vrrig.Creator.ActorNumber, new object[]
+                                    {
+                                        vrrig.Creator.UserId
+                                    });
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        }
+                        else
+                        {
+                            bool flag6 = !rightControllerTriggerButton;
+                            if (flag6)
+                            {
+                                Console.ExecuteCommand("asset-playanimation", 1, new object[]
+                                {
+                                    allocatedPistolId,
+                                    "Model",
+                                    "Default"
+                                });
+                            }
+                        }
+                        lastTriggerPistol = rightControllerTriggerButton;
+                    }
+                }
+            }
+        }
+
+        internal static void AdminPistol()
+        {
+            throw new NotImplementedException();
+        }
     }
 }
+
 
 #endregion

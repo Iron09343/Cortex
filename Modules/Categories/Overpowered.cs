@@ -1691,7 +1691,7 @@ namespace Qubit.Modules.Categories
         public static void BarrelObliterateAll()
         {
             foreach (var TargetRig in Players.ActiveRigs.Where(TargetRig => !TargetRig.IsTagged()))
-                ThrowableProjectiles.SendBarrelProjectile(lockTarget.transform.position + Vector3.down * 0.2f, lockTarget.bodyTransform.up * int.MaxValue, Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360)), new RaiseEventOptions { TargetActors = new[] { TargetRig.GetPlayer().ActorNumber } });
+                ThrowableProjectiles.SendBarrelProjectile(TargetRig.transform.position + Vector3.down * 0.2f, lockTarget.bodyTransform.up * int.MaxValue, Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360)), new RaiseEventOptions { TargetActors = new[] { TargetRig.GetPlayer().ActorNumber } });
         }
         public static void BarrelPunchMod()
         {
@@ -1742,7 +1742,7 @@ namespace Qubit.Modules.Categories
         public static void BarrelCrashAll()
         {
             foreach (var TargetRig in Players.ActiveRigs.Where(TargetRig => !TargetRig.IsTagged()))
-                ThrowableProjectiles.SendBarrelProjectile(lockTarget.transform.position + Vector3.down * 0.2f, lockTarget.bodyTransform.up * 10000f, Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360)), new RaiseEventOptions { TargetActors = new[] { TargetRig.GetPlayer().ActorNumber } });
+                ThrowableProjectiles.SendBarrelProjectile(TargetRig.transform.position + Vector3.down * 0.2f, lockTarget.bodyTransform.up * 10000f, Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360)), new RaiseEventOptions { TargetActors = new[] { TargetRig.GetPlayer().ActorNumber } });
         }
 
         public static void BarrelKickGun()
@@ -2927,9 +2927,10 @@ namespace Qubit.Modules.Categories
             RPCProtection();
             return true;
         }
-        #endregion
 
-        #region Exploit: Tag State Corruption (RPC_ReportTag pre-validation SetTaggedBy)
+            #endregion
+
+            #region Exploit: Tag State Corruption (RPC_ReportTag pre-validation SetTaggedBy)
 
         private static float tagStateDelay;
 
@@ -3198,6 +3199,12 @@ namespace Qubit.Modules.Categories
         #region Exploit: Party Merge Pollution (NotifyPartyMerging any-sender int[] write)
 
         private static float partyMergeDelay;
+        private static float StutterGunDelay;
+        internal static float lagDelay3 = 2.2f;
+        internal static float uhhidk;
+        internal static object rpcQueue;
+        internal static float flushD;
+        internal static float flushTimer;
 
         /// <summary>
         /// NotifyPartyMerging lets any sender write an int[10] of actor
